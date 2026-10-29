@@ -1,0 +1,480 @@
+//! `Var` — the universal dynamic value, a Rust reimagining of gold's `var`.
+//!
+//! Copy-on-write: `List`/`Object` payloads are shared through `Rc<RefCell<…>>`,
+//! so passing a `Var` by value is a cheap pointer bump, exactly like gold's
+//! `shared_ptr`-backed `var`. Because the payload uses interior mutability, a
+//! write through one handle is visible through every other handle that shares
+//! it — which is what lets the `VarRef` proxy mutate the original in place,
+//! faithfully reproducing gold's `varRef`.
+
+use std::fmt;
+use std::ops::{Add, Div, Mul, Neg, Sub};
+use std::rc::Rc;
+
+use crate::list::List;
+use crate::object::Object;
+
+/// A value's runtime type tag. Kept for introspection (`as_*` / `is_*`), the
+/// way gold has `types`. Most code won't match on this — it's there when you
+/// need it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ty {
+    Null,
+    Bool,
+    I64,
+    F64,
+    Str,
+    List,
+    Object,
+    Func,
+    Vec3,
+    Vec4,
+    Quat,
+}
+
+impl fmt::Display for Ty {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Ty::Null => "null",
+            Ty::Bool => "bool",
+            Ty::I64 => "int",
+            Ty::F64 => "float",
+            Ty::Str => "string",
+            Ty::List => "list",
+            Ty::Object => "object",
+            Ty::Func => "function",
+            Ty::Vec3 => "vec3",
+            Ty::Vec4 => "vec4",
+            Ty::Quat => "quat",
+        };
+        f.write_str(s)
+    }
+}
+
+/// A 3-component float vector (mirrors gold's vec3f).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Vec3 {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+impl Vec3 {
+    pub fn new(x: f32, y: f32, z: f32) -> Self { Vec3 { x, y, z } }
+}
+
+/// A 4-component float vector.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Vec4 {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub w: f32,
+}
+impl Vec4 {
+    pub fn new(x: f32, y: f32, z: f32, w: f32) -> Self { Vec4 { x, y, z, w } }
+}
+
+/// A quaternion.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Quat {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub w: f32,
+}
+impl Quat {
+    pub fn new(x: f32, y: f32, z: f32, w: f32) -> Self { Quat { x, y, z, w } }
+}
+
+/// The universal dynamic value.
+///
+/// ```
+/// use mercury::Var;
+/// let v = Var::from(42i64);
+/// assert_eq!(v.as_i64(), Some(42));
+/// assert_eq!(v.ty(), mercury::Ty::I64);
+/// ```
+/// A type-erased, reference-counted function: `Rc<dyn Fn(&[Var]) -> Var>`.
+/// This is Mercury's `func` — the gold `func` equivalent.
+type Func = Rc<dyn Fn(&[Var]) -> Var>;
+
+#[derive(Clone)]
+pub enum Var {
+    Null,
+    Bool(bool),
+    I64(i64),
+    F64(f64),
+    Str(String),
+    List(List),
+    Object(Object),
+    Func(Func),
+    Vec3(Vec3),
+    Vec4(Vec4),
+    Quat(Quat),
+}
+
+impl std::fmt::Debug for Var {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Var::Null => f.write_str("Null"),
+            Var::Bool(b) => f.debug_tuple("Bool").field(b).finish(),
+            Var::I64(n) => f.debug_tuple("I64").field(n).finish(),
+            Var::F64(n) => f.debug_tuple("F64").field(n).finish(),
+            Var::Str(s) => f.debug_tuple("Str").field(s).finish(),
+            Var::List(l) => f.debug_tuple("List").field(l).finish(),
+            Var::Object(o) => f.debug_tuple("Object").field(o).finish(),
+            Var::Func(_) => f.write_str("Func(<fn>)"),
+            Var::Vec3(v) => f.debug_tuple("Vec3").field(v).finish(),
+            Var::Vec4(v) => f.debug_tuple("Vec4").field(v).finish(),
+            Var::Quat(v) => f.debug_tuple("Quat").field(v).finish(),
+        }
+    }
+}
+
+impl PartialEq for Var {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Var::Null, Var::Null) => true,
+            (Var::Bool(a), Var::Bool(b)) => a == b,
+            (Var::I64(a), Var::I64(b)) => a == b,
+            (Var::F64(a), Var::F64(b)) => a == b,
+            (Var::Str(a), Var::Str(b)) => a == b,
+            (Var::List(a), Var::List(b)) => a == b,
+            (Var::Object(a), Var::Object(b)) => a == b,
+            (Var::Vec3(a), Var::Vec3(b)) => a == b,
+            (Var::Vec4(a), Var::Vec4(b)) => a == b,
+            (Var::Quat(a), Var::Quat(b)) => a == b,
+            // functions can't be compared for equality (closures have no
+            // identity we can inspect), so treat them as unequal.
+            _ => false,
+        }
+    }
+}
+
+/// The JS-style `null` value. Write it as a bare literal instead of
+/// `Var::Null` / `mercury::Ty::Null`:
+///
+/// ```
+/// use mercury::Null;
+/// let v = mercury::Var::from(Null);
+/// assert_eq!(v.ty(), mercury::Ty::Null);
+/// ```
+#[allow(non_upper_case_globals)]
+pub const Null: Var = Var::Null;
+
+impl Var {
+    /// The runtime type tag.
+    pub fn ty(&self) -> Ty {
+        match self {
+            Var::Null => Ty::Null,
+            Var::Bool(_) => Ty::Bool,
+            Var::I64(_) => Ty::I64,
+            Var::F64(_) => Ty::F64,
+            Var::Str(_) => Ty::Str,
+            Var::List(_) => Ty::List,
+            Var::Object(_) => Ty::Object,
+            Var::Func(_) => Ty::Func,
+            Var::Vec3(_) => Ty::Vec3,
+            Var::Vec4(_) => Ty::Vec4,
+            Var::Quat(_) => Ty::Quat,
+        }
+    }
+
+    /// Truthiness, JS-style: null/0/""/false are falsy.
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            Var::Null => false,
+            Var::Bool(b) => *b,
+            Var::I64(n) => *n != 0,
+            Var::F64(n) => *n != 0.0,
+            Var::Str(s) => !s.is_empty(),
+            _ => true, // objects/lists/functions are always truthy
+        }
+    }
+
+    // ---- numeric reads (None on type mismatch) ----
+
+    pub fn as_i64(&self) -> Option<i64> {
+        match self {
+            Var::I64(n) => Some(*n),
+            Var::F64(n) => Some(*n as i64),
+            Var::Bool(b) => Some(*b as i64),
+            _ => None,
+        }
+    }
+
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            Var::F64(n) => Some(*n),
+            Var::I64(n) => Some(*n as f64),
+            Var::Bool(b) => Some(*b as i64 as f64),
+            _ => None,
+        }
+    }
+
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            Var::Bool(b) => Some(*b),
+            _ => Some(self.is_truthy()),
+        }
+    }
+
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Var::Str(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+
+    pub fn as_string(&self) -> Option<String> {
+        match self {
+            Var::Str(s) => Some(s.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn as_list(&self) -> Option<&List> {
+        match self {
+            Var::List(l) => Some(l),
+            _ => None,
+        }
+    }
+
+    pub fn as_object(&self) -> Option<&Object> {
+        match self {
+            Var::Object(o) => Some(o),
+            _ => None,
+        }
+    }
+
+    // ---- property access (gold's v["key"] / v[i]) ----
+    //
+    // Rust's `Index` can't return by value or reach behind interior mutability,
+    // so reads use `.get()` (null-safe, prototype-walking for objects). Writes
+    // use `.set()` or the `.at()` proxy — see `VarRef`.
+
+    /// Read `key` (objects, walking the prototype chain) or empty for misses
+    /// and non-objects. The JS `obj[k]` → `undefined` semantics, minus the
+    /// silent-any footgun: pair with `.as_*()` or `Into<…>` for typed reads.
+    pub fn get(&self, key: &str) -> Var {
+        match self {
+            Var::Object(o) => o.get(key),
+            _ => Var::Null,
+        }
+    }
+
+    /// Read index `i` of a list; empty for non-lists / out of range.
+    pub fn get_idx(&self, i: usize) -> Var {
+        match self {
+            Var::List(l) => l.get(i),
+            _ => Var::Null,
+        }
+    }
+
+    /// Read a dotted path: `v.get_path("stats.score")`.
+    pub fn get_path(&self, path: &str) -> Var {
+        let mut cur = self.clone();
+        for part in path.split('.') {
+            cur = cur.get(part);
+        }
+        cur
+    }
+
+    /// Write `key` on an object (no-op-ish: panics on non-objects, which is the
+    /// safe default vs gold's silent no-op).
+    pub fn set(&self, key: &str, value: impl Into<Var>) {
+        match self {
+            Var::Object(o) => o.set(key, value.into()),
+            _ => panic!("cannot set key {key:?} on non-object {}", self.ty()),
+        }
+    }
+
+    /// Write index `i` of a list (grows the list if needed, JS-style).
+    pub fn set_idx(&self, i: usize, value: impl Into<Var>) {
+        match self {
+            Var::List(l) => l.set(i, value.into()),
+            _ => panic!("cannot set index on non-list {}", self.ty()),
+        }
+    }
+
+    /// Write a dotted path: `v.set_path("stats.score", 10)`. Creates missing
+    /// intermediate objects along the way (JS `obj.a.b = 1` semantics).
+    pub fn set_path(&self, path: &str, value: impl Into<Var>) {
+        if let Var::Object(_) = self {
+            set_path_impl(self, path, value.into());
+        } else {
+            panic!("cannot set_path on non-object {}", self.ty());
+        }
+    }
+
+    /// Return a `VarRef` proxy for `key` — the gold-like handle for chained
+    /// read/write: `v.at("a").at("b").put(5)`.
+    pub fn at(&self, key: &str) -> crate::proxy::VarRef {
+        crate::proxy::VarRef::object(self.clone(), key)
+    }
+
+    /// `VarRef` proxy for a list index.
+    pub fn at_idx(&self, i: usize) -> crate::proxy::VarRef {
+        crate::proxy::VarRef::index(self.clone(), i)
+    }
+
+    // ---- call (gold's var operator()) ----
+    pub fn call(&self, args: &[Var]) -> Var {
+        match self {
+            Var::Func(f) => f(args),
+            _ => panic!("cannot call non-function {}", self.ty()),
+        }
+    }
+}
+
+// ---- stringification (gold's `var.getString()` for every type) ----
+
+impl fmt::Display for Var {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Var::Null => f.write_str("null"),
+            Var::Bool(b) => write!(f, "{b}"),
+            Var::I64(n) => write!(f, "{n}"),
+            Var::F64(n) => write!(f, "{n}"),
+            Var::Str(s) => f.write_str(s),
+            Var::Vec3(v) => write!(f, "vec3({}, {}, {})", v.x, v.y, v.z),
+            Var::Vec4(v) => write!(f, "vec4({}, {}, {}, {})", v.x, v.y, v.z, v.w),
+            Var::Quat(v) => write!(f, "quat({}, {}, {}, {})", v.x, v.y, v.z, v.w),
+            Var::List(_) => f.write_str("[...]"),
+            Var::Object(_) => f.write_str("{...}"),
+            Var::Func(_) => f.write_str("<function>"),
+        }
+    }
+}
+
+// ---- arithmetic (gold overloads +,-,*,/ on var) ----
+//
+// Numeric ops widen: int + float -> float. Mismatched/unsupported types panic
+// with a clear message; a production build might return an error Var instead.
+
+impl Add for Var {
+    type Output = Var;
+    fn add(self, rhs: Var) -> Var {
+        if let (Some(a), Some(b)) = (self.as_f64(), rhs.as_f64()) {
+            return Var::F64(a + b);
+        }
+        if let (Some(a), Some(b)) = (self.as_i64(), rhs.as_i64()) {
+            return Var::I64(a + b);
+        }
+        panic!("cannot add {self} + {rhs}");
+    }
+}
+
+impl Sub for Var {
+    type Output = Var;
+    fn sub(self, rhs: Var) -> Var {
+        if let (Some(a), Some(b)) = (self.as_f64(), rhs.as_f64()) {
+            return Var::F64(a - b);
+        }
+        if let (Some(a), Some(b)) = (self.as_i64(), rhs.as_i64()) {
+            return Var::I64(a - b);
+        }
+        panic!("cannot subtract {self} - {rhs}");
+    }
+}
+
+impl Mul for Var {
+    type Output = Var;
+    fn mul(self, rhs: Var) -> Var {
+        if let (Some(a), Some(b)) = (self.as_f64(), rhs.as_f64()) {
+            return Var::F64(a * b);
+        }
+        if let (Some(a), Some(b)) = (self.as_i64(), rhs.as_i64()) {
+            return Var::I64(a * b);
+        }
+        panic!("cannot multiply {self} * {rhs}");
+    }
+}
+
+impl Div for Var {
+    type Output = Var;
+    fn div(self, rhs: Var) -> Var {
+        if let (Some(a), Some(b)) = (self.as_f64(), rhs.as_f64()) {
+            return Var::F64(a / b);
+        }
+        if let (Some(a), Some(b)) = (self.as_i64(), rhs.as_i64()) {
+            return Var::I64(a / b);
+        }
+        panic!("cannot divide {self} / {rhs}");
+    }
+}
+
+impl Neg for Var {
+    type Output = Var;
+    fn neg(self) -> Var {
+        match self {
+            Var::F64(n) => Var::F64(-n),
+            Var::I64(n) => Var::I64(-n),
+            other => panic!("cannot negate {other}"),
+        }
+    }
+}
+
+// ---- ergonomic conversions (gold's implicit constructor set) ----
+
+impl From<()> for Var {
+    fn from(_: ()) -> Self { Var::Null }
+}
+impl From<bool> for Var { fn from(b: bool) -> Self { Var::Bool(b) } }
+impl From<i64> for Var { fn from(n: i64) -> Self { Var::I64(n) } }
+impl From<i32> for Var { fn from(n: i32) -> Self { Var::I64(n as i64) } }
+impl From<u64> for Var { fn from(n: u64) -> Self { Var::I64(n as i64) } }
+impl From<f64> for Var { fn from(n: f64) -> Self { Var::F64(n) } }
+impl From<f32> for Var { fn from(n: f32) -> Self { Var::F64(n as f64) } }
+impl From<&str> for Var { fn from(s: &str) -> Self { Var::Str(s.to_string()) } }
+impl From<String> for Var { fn from(s: String) -> Self { Var::Str(s) } }
+impl From<Vec3> for Var { fn from(v: Vec3) -> Self { Var::Vec3(v) } }
+impl From<Vec4> for Var { fn from(v: Vec4) -> Self { Var::Vec4(v) } }
+impl From<Quat> for Var { fn from(v: Quat) -> Self { Var::Quat(v) } }
+
+impl From<List> for Var { fn from(l: List) -> Self { Var::List(l) } }
+impl From<Object> for Var { fn from(o: Object) -> Self { Var::Object(o) } }
+
+/// Typed read conversions — the JS-flavored way to pull a concrete value out
+/// of a `Var`. `let s: String = v.get("name").into();`
+///
+/// `Null` converts to the zero/empty value (JS-ish coercion: null → 0/""/false),
+/// and a type mismatch coerces via `to_string()` for strings or saturates to
+/// zero for numbers. For strict reads, use the `as_*()` methods instead.
+impl From<Var> for String {
+    fn from(v: Var) -> Self { v.to_string() }
+}
+impl From<Var> for i64 {
+    fn from(v: Var) -> Self { v.as_i64().unwrap_or(0) }
+}
+impl From<Var> for f64 {
+    fn from(v: Var) -> Self { v.as_f64().unwrap_or(0.0) }
+}
+impl From<Var> for bool {
+    fn from(v: Var) -> Self { v.is_truthy() }
+}
+
+/// Recursively write `path` ("a.b.c") on an object, creating intermediate
+/// objects. Because payloads are `Rc<RefCell>`, this mutates the shared data
+/// in place, visible through every handle — matching gold's `varRef`.
+pub(crate) fn set_path_impl(target: &Var, path: &str, value: Var) {
+    let (first, rest) = match path.split_once('.') {
+        Some((f, r)) => (f, Some(r)),
+        None => (path, None),
+    };
+    match target {
+        Var::Object(o) => match rest {
+            Some(rest) => {
+                // descend: ensure child is an object, then recurse on the tail
+                let mut child = o.get(first);
+                if !matches!(child, Var::Object(_)) {
+                    child = Var::from(Object::new());
+                    o.set(first, child.clone());
+                }
+                set_path_impl(&child, rest, value);
+            }
+            None => o.set(first, value),
+        },
+        other => panic!("cannot descend into {other}"),
+    }
+}
