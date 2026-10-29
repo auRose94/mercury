@@ -52,7 +52,7 @@ impl fmt::Display for Ty {
 }
 
 /// A 3-component float vector (mirrors gold's vec3f).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Vec3 {
     pub x: f32,
     pub y: f32,
@@ -63,7 +63,7 @@ impl Vec3 {
 }
 
 /// A 4-component float vector.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Vec4 {
     pub x: f32,
     pub y: f32,
@@ -75,7 +75,7 @@ impl Vec4 {
 }
 
 /// A quaternion.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Quat {
     pub x: f32,
     pub y: f32,
@@ -434,6 +434,112 @@ impl From<Quat> for Var { fn from(v: Quat) -> Self { Var::Quat(v) } }
 
 impl From<List> for Var { fn from(l: List) -> Self { Var::List(l) } }
 impl From<Object> for Var { fn from(o: Object) -> Self { Var::Object(o) } }
+
+// ---- serde: one trait covers every serde format (JSON/BSON/CBOR/MsgPack/…) ----
+//
+// `Var` is the universal dynamic value, so it serializes to/from a serde data
+// model. The `Func` variant has no data-model representation — it serializes
+// as `null` and deserializes back to `Null` (you can't round-trip a closure).
+
+impl serde::Serialize for Var {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        match self {
+            Var::Null => serializer.serialize_none(),
+            Var::Bool(b) => serializer.serialize_bool(*b),
+            Var::I64(n) => serializer.serialize_i64(*n),
+            Var::F64(n) => serializer.serialize_f64(*n),
+            Var::Str(s) => serializer.serialize_str(s),
+            Var::List(l) => {
+                use serde::ser::SerializeSeq;
+                let mut seq = serializer.serialize_seq(Some(l.len()))?;
+                for item in l.iter() {
+                    seq.serialize_element(&item)?;
+                }
+                seq.end()
+            }
+            Var::Object(o) => {
+                let mut map = serializer.serialize_map(None)?;
+                for (k, v) in o.entries() {
+                    map.serialize_entry(k.as_str(), &v)?;
+                }
+                map.end()
+            }
+            Var::Vec3(v) => serializer.serialize_some(v),
+            Var::Vec4(v) => serializer.serialize_some(v),
+            Var::Quat(v) => serializer.serialize_some(v),
+            // functions aren't a data-model value
+            Var::Func(_) => serializer.serialize_none(),
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Var {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Route through serde's own value model (Option/Seq/Map/Scalar) and
+        // reconstruct the matching `Var`. Using a visitor keeps it format-
+        // agnostic.
+        use serde::de::{self, MapAccess, SeqAccess, Visitor};
+        use std::fmt;
+
+        struct VarVisitor;
+
+        impl<'de> Visitor<'de> for VarVisitor {
+            type Value = Var;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("any JSON-like value")
+            }
+
+            fn visit_bool<E: de::Error>(self, v: bool) -> Result<Var, E> {
+                Ok(Var::Bool(v))
+            }
+            fn visit_i64<E: de::Error>(self, v: i64) -> Result<Var, E> {
+                Ok(Var::I64(v))
+            }
+            fn visit_u64<E: de::Error>(self, v: u64) -> Result<Var, E> {
+                Ok(Var::I64(v as i64))
+            }
+            fn visit_f64<E: de::Error>(self, v: f64) -> Result<Var, E> {
+                Ok(Var::F64(v))
+            }
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Var, E> {
+                Ok(Var::Str(v.to_string()))
+            }
+            fn visit_string<E: de::Error>(self, v: String) -> Result<Var, E> {
+                Ok(Var::Str(v))
+            }
+            fn visit_none<E: de::Error>(self) -> Result<Var, E> {
+                Ok(Var::Null)
+            }
+            fn visit_unit<E: de::Error>(self) -> Result<Var, E> {
+                Ok(Var::Null)
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Var, A::Error> {
+                let mut items: Vec<Var> = Vec::new();
+                while let Some(item) = seq.next_element()? {
+                    items.push(item);
+                }
+                Ok(Var::List(List::from_iter(items)))
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Var, A::Error> {
+                let o = Object::new();
+                while let Some((k, v)) = map.next_entry::<String, Var>()? {
+                    o.set(k, v);
+                }
+                Ok(Var::Object(o))
+            }
+        }
+
+        deserializer.deserialize_any(VarVisitor)
+    }
+}
 
 /// Typed read conversions — the JS-flavored way to pull a concrete value out
 /// of a `Var`. `let s: String = v.get("name").into();`

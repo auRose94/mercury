@@ -43,6 +43,55 @@ impl PartialEq for Object {
     }
 }
 
+// ---- serde ----
+//
+// An Object serializes as a JSON object of its own keys (the prototype chain
+// is not serialized — it's behavior, not data).
+
+impl serde::Serialize for Object {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        for (k, v) in self.entries() {
+            map.serialize_entry(k.as_str(), &v)?;
+        }
+        map.end()
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Object {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{MapAccess, Visitor};
+        use std::fmt;
+
+        struct ObjectVisitor;
+
+        impl<'de> Visitor<'de> for ObjectVisitor {
+            type Value = Object;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a JSON object")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Object, A::Error> {
+                let o = Object::new();
+                while let Some((k, v)) = map.next_entry::<String, Var>()? {
+                    o.set(k, v);
+                }
+                Ok(o)
+            }
+        }
+
+        deserializer.deserialize_map(ObjectVisitor)
+    }
+}
+
 impl Object {
     pub fn new() -> Self { Object::default() }
 

@@ -36,6 +36,13 @@ impl PartialEq for List {
     }
 }
 
+impl FromIterator<Var> for List {
+    fn from_iter<T: IntoIterator<Item = Var>>(iter: T) -> Self {
+        let items: Vec<Var> = iter.into_iter().collect();
+        List { items: Rc::new(RefCell::new(items)) }
+    }
+}
+
 impl List {
     pub fn new() -> Self { List::default() }
 

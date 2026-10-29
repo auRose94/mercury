@@ -5,11 +5,17 @@ edition = "2021"
 description = "Mercury — a Rust reimagining of gold: JS-like dynamic values (var) with copy-on-write ergonomics, plus the sugar that makes prototyping feel like JavaScript."
 license = "MIT"
 
-# Dependency-light on purpose. indexmap is the one real dependency, and it's
-# the right call: gold's object preserves insertion order, and indexmap is the
-# wheel for that — no point hand-rolling an ordered map. serde is the obvious
-# next add (it would replace gold's hand-rolled JSON/BSON/CBOR/MsgPack/UBJSON
-# with a single trait). No engine deps yet; Bevy coexistence is a later concern.
+# Dependencies:
+# - indexmap: gold's object preserves insertion order; indexmap is the wheel
+#   for that — no hand-rolled ordered map.
+# - serde: the non-negotiable. One Serialize/Deserialize impl on Var replaces
+#   gold's hand-rolled JSON/BSON/CBOR/MsgPack/UBJSON — any serde format works
+#   for free.
+# No engine deps yet; Bevy coexistence is a later concern (see docs/roadmap.md).
 
 [dependencies]
 indexmap = "2"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
