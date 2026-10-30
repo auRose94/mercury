@@ -11,11 +11,40 @@ license = "MIT"
 # - serde: the non-negotiable. One Serialize/Deserialize impl on Var replaces
 #   gold's hand-rolled JSON/BSON/CBOR/MsgPack/UBJSON — any serde format works
 #   for free.
+# - axum + tokio (optional, behind the `web` feature): the expressjs-like web
+#   layer, where routes are `Var -> Var` closures. Needs the core to be
+#   Send + Sync — which Arc/Mutex payloads deliver for the game module's
+#   future job system too.
 # No engine deps yet; Bevy coexistence is a later concern (see docs/roadmap.md).
 
 [dependencies]
 indexmap = "2"
 serde = { version = "1", features = ["derive"] }
+axum = { version = "0.8", features = ["ws"], optional = true }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "time"], optional = true }
+# web feature internals: JSON responses, ws send/receive streams
+serde_json = { version = "1", optional = true }
+futures-util = { version = "0.3", optional = true }
+
+[features]
+default = []
+# web: the expressjs-like layer. Optional so the core stays lean for
+# embedding (Bevy etc.).
+web = ["dep:axum", "dep:tokio", "dep:serde_json", "dep:futures-util"]
 
 [dev-dependencies]
 serde_json = "1"
+# web-layer tests drive the Router without binding a port (tower oneshot),
+# and speak real HTTP/WebSockets against a live server
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+
+[[example]]
+name = "web_demo"
+required-features = ["web"]
+
+[[example]]
+name = "web_site"
+required-features = ["web"]

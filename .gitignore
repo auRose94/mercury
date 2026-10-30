@@ -1,2 +1,4 @@
 /target
-Cargo.lock  # library crate: let downstream pick versions
+Cargo.lock
+# library crate: let downstream pick versions
+/public

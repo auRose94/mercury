@@ -60,18 +60,22 @@ let json = serde_json::to_string(&v).unwrap();
 
 ## Modules
 
-- **Core** — `Var` / `Object` / `List` / `VarRef` / sugar / serde. *Done.*
-- **Web** — HTTP/async layer over `Var` (hyper + tokio/futures). Planned.
+- **Core** — `Var` / `Object` / `List` / `VarRef` / sugar / serde / `Func`. *Done.*
+- **Web** — gold's expressjs-like `Server`: all verbs, `:param`/`*` patterns,
+  WebSocket routes, static mounts, an error hook, graceful start/stop
+  (axum + tokio, behind the `web` feature). HTML/CSS parsers and the file
+  dataStore are next. *Server facade done.*
 - **Game** — `wgpu` graphics, pump-and-dispatch engine loop. Planned.
 
 See [docs/roadmap.md](docs/roadmap.md) for the full plan and the architecture
-decisions (why `Rc<RefCell>`, why serde, why not Bevy).
+decisions (why `Arc<Mutex>`, why serde, why not Bevy).
 
 ## Build & test
 
 ```
-cargo test
-cargo clippy
+cargo test                  # core tests
+cargo test --all-features   # + web layer
+cargo clippy --all-targets
 ```
 
 ## License

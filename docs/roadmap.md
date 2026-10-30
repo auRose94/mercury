@@ -29,26 +29,31 @@ copy JavaScript:
 
 ## Current state — Core module
 
-The core is implemented and tested (`tests/ergonomics.rs`, `tests/serde.rs`):
+The core is implemented and tested (`tests/ergonomics.rs`, `tests/serde.rs`,
+`tests/func.rs`, `tests/threads.rs`; the web layer in `tests/web.rs` and
+`tests/web_server.rs`):
 
 | File | What |
 | --- | --- |
-| `src/var.rs` | `Var` — the COW dynamic value; `Ty` tag; arithmetic; `From` conversions; `Null` literal; serde `Serialize`/`Deserialize` |
+| `src/var.rs` | `Var` — the COW dynamic value; `Ty` tag; arithmetic; `From` conversions; `Null` literal; `Func` (id-bearing function value); serde `Serialize`/`Deserialize` |
 | `src/object.rs` | `Object` — insertion-ordered map + prototype chain (`set_parent`/`inherits`); serde |
 | `src/list.rs` | `List` — ordered array, grows-with-nulls on index-set |
 | `src/proxy.rs` | `VarRef` — write-back proxy (`v.at("k").put(5)`), mutates the shared value in place |
-| `src/sugar.rs` | `o!{}`, `a![]`, `tpl!`, `each`/`map`/`filter`/`find`/`join` |
+| `src/sugar.rs` | `o!{}`, `a![]`, `tpl!`, `func!`, `each`/`map`/`filter`/`find`/`join` |
+| `src/web/` | web layer (behind the `web` feature) — `Server` facade (verbs, `:param`/`*` patterns, `ws`, `mount`, `on_error`, `start`/`stop`), `Response`, request staging; `post_var`/`get_var` sugar; axum underneath |
 
 Key design choices:
 
-- **`Rc<RefCell<…>>` payloads.** This is what lets the `VarRef` proxy mutate
-  the *original* shared value in place — the faithful gold behavior. It also
-  means single-threaded safety comes from the borrow checker; a multithreaded
-  build would swap `RefCell` for `Mutex`.
+- **`Arc<Mutex<…>>` payloads.** This is what lets the `VarRef` proxy mutate
+  the *original* shared value in place — the faithful gold behavior — and it
+  makes the whole value graph `Send + Sync`: the same `Var` crosses threads,
+  async tasks, and web handlers (pinned by a compile-time assertion in
+  `lib.rs`). Locks are poison-tolerant (`RefCell` never poisoned either).
 - **serde is the non-negotiable serialization layer.** One `Serialize`/
   `Deserialize` impl on `Var` replaces gold's hand-rolled JSON/BSON/CBOR/
   MsgPack/UBJSON — any serde format works for free. The `Func` variant has no
-  data-model form, so it serializes as `null` (you can't round-trip a closure).
+  data-model form, so it serializes as `null` (you can't round-trip a closure);
+  an id→Func registry could later round-trip handles as `{"__func__": id}`.
 - **`o!`/`a!`** (renamed from `jo!`/`ja!`): `o` reads as "object" instantly;
   the `j` was only there to disambiguate for C++/HTML keywords.
 
@@ -62,13 +67,26 @@ rather than reinventing wheels.
 - wgpu-free today; the core is pure data. Next: a `FromVar` derive macro —
   the Rust-native answer to "script ergonomics + native speed": derive a
   typed struct from a `Var` for the hot path.
-- `Var` equality treats two functions as unequal (closures have no inspectable
-  identity); revisit if a real use case needs it.
+- Functions (done): `Func` carries a stable id, so `Var` equality compares
+  functions by id — clones equal their original; fresh functions never compare
+  equal. Still open: the id→Func registry for serde round-tripping.
 
 ### 2. Web module
 
 gold had a web/UI layer; Mercury's web layer leans on Rust's mature HTTP
-ecosystem instead of reinventing it:
+ecosystem instead of reinventing it.
+
+*Server facade (gold parity):* `mercury::web` behind the `web` feature mirrors
+gold's `web::server` — `get`/`post`/`put`/`patch`/`delete`/`options` routes
+with `:param` and trailing-`*` patterns (gold's uWS conventions), requests
+staged as `Var` (`method`/`path`/`params`/`query`/`headers` + a body parsed by
+content type), `ws` routes with `open`/`message`/`close` and a `send`/`close`
+socket handle, static-file `mount`s with mime detection, an `on_error` hook
+for the 404 page, and graceful, restartable `start()`/`stop()`. Tests drive
+real HTTP and WebSocket wire traffic; `examples/web_site.rs` is a multi-page
+homage to gold's `myWebProject`. Still to port from gold's web module: the
+HTML builder/parser, the CSS parser, the file-backed dataStore, streaming
+responses (`onData`), and HTTPS (gold's `sslCert`/`sslKey` vhost keys).
 
 - **`hyper`** (or `axum`, which is built on hyper) for the HTTP server — the
   wheel for request/response handling.
@@ -115,6 +133,7 @@ ecosystem instead of reinventing it:
 ## Verify
 
 ```
-cargo test        # core + serde tests
-cargo clippy
+cargo test                  # core tests
+cargo test --all-features   # + web layer
+cargo clippy --all-targets
 ```
