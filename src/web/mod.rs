@@ -25,6 +25,7 @@
 //! ```
 
 pub mod css;
+pub mod database;
 pub mod html;
 pub mod store;
 

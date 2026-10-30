@@ -8,7 +8,9 @@
 //! - **[`Server`]** (gold's `server` facade): `get`/`post`/`put`/`patch`/
 //!   `delete`/`options` routes with `:param` and trailing `*` patterns,
 //!   WebSocket routes (`open`/`message`/`close`), `mount` for static files,
-//!   an `on_error` hook for unmatched requests, and graceful, restartable
+//!   an `on_error` hook for unmatched requests, streamed bodies both ways
+//!   (`route_stream` / [`Response::stream`] — gold's `onData`/`write`),
+//!   HTTPS via the `sslCert`/`sslKey` config keys, and graceful, restartable
 //!   `start()`/`stop()`.
 //! - **Sugar** ([`post_var`]/[`get_var`]/[`serve`]): one-shot routers when a
 //!   whole `Server` is more than you need.
@@ -47,7 +49,6 @@ pub use server::{Server, WsHandlers, WsSock};
 // ---- response (gold's `response`: status / headers / typed body) ----
 
 /// The body flavor of a [`Response`]; picks the default content type.
-#[derive(Clone, Debug)]
 enum RespBody {
     /// Serialized as JSON (`application/json`).
     Json(Var),
@@ -57,13 +58,15 @@ enum RespBody {
     Text(String),
     /// Sent verbatim (`application/octet-stream` unless `ct` overrides).
     Raw(Vec<u8>),
+    /// Sent as chunked frames (`application/octet-stream` unless `ct`
+    /// overrides) — gold's `write`/`end` loop, and the SSE shape.
+    Stream(axum::body::Body),
 }
 
 /// A response under construction: status, extra headers, and a typed body.
 /// Returned from route handlers; `Var`, `String`, and `&str` all convert
 /// into one (`Var` → JSON 200, strings → HTML 200), so simple handlers can
 /// return the body directly.
-#[derive(Clone, Debug)]
 pub struct Response {
     status: u16,
     headers: Vec<(String, String)>,
@@ -92,6 +95,22 @@ impl Response {
         Response { status: 200, headers: Vec::new(), ct: None, body: RespBody::Raw(body.into()) }
     }
 
+    /// `200` streamed: each stream item becomes one chunked-transfer frame
+    /// (gold's `write`/`end` loop; `text/event-stream` + this is SSE).
+    pub fn stream<S>(source: S) -> Self
+    where
+        S: futures_util::TryStream + Send + 'static,
+        S::Ok: Into<axum::body::Bytes>,
+        S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        Response {
+            status: 200,
+            headers: Vec::new(),
+            ct: None,
+            body: RespBody::Stream(axum::body::Body::from_stream(source)),
+        }
+    }
+
     /// Override the status code (gold's `res.writeStatus`).
     pub fn status(mut self, code: u16) -> Self {
         self.status = code;
@@ -113,25 +132,34 @@ impl Response {
 
 impl axum::response::IntoResponse for Response {
     fn into_response(self) -> AxumResponse {
-        let (bytes, default_ct) = match &self.body {
-            RespBody::Json(v) => (
-                serde_json::to_vec(v).unwrap_or_else(|_| b"null".to_vec()),
-                "application/json",
-            ),
-            RespBody::Html(s) => (s.clone().into_bytes(), "text/html; charset=utf-8"),
-            RespBody::Text(s) => (s.clone().into_bytes(), "text/plain; charset=utf-8"),
-            RespBody::Raw(b) => (b.clone(), "application/octet-stream"),
+        let default_ct = match &self.body {
+            RespBody::Json(_) => "application/json",
+            RespBody::Html(_) => "text/html; charset=utf-8",
+            RespBody::Text(_) => "text/plain; charset=utf-8",
+            RespBody::Raw(_) | RespBody::Stream(_) => "application/octet-stream",
         };
-        let ct = self.ct.clone().unwrap_or_else(|| default_ct.to_string());
-        let status = axum::http::StatusCode::from_u16(self.status)
+        let Response { status, headers, ct, body } = self;
+        let status = axum::http::StatusCode::from_u16(status)
             .unwrap_or(axum::http::StatusCode::OK);
-        let mut res = AxumResponse::new(axum::body::Body::from(bytes));
+        let mut res = match body {
+            RespBody::Stream(b) => AxumResponse::new(b),
+            other => AxumResponse::new(axum::body::Body::from(match other {
+                RespBody::Json(v) => {
+                    serde_json::to_vec(&v).unwrap_or_else(|_| b"null".to_vec())
+                }
+                RespBody::Html(s) => s.into_bytes(),
+                RespBody::Text(s) => s.into_bytes(),
+                RespBody::Raw(b) => b,
+                RespBody::Stream(_) => unreachable!(),
+            })),
+        };
         *res.status_mut() = status;
+        let ct = ct.unwrap_or_else(|| default_ct.to_string());
         if let Ok(v) = ct.parse() {
             res.headers_mut().insert(header::CONTENT_TYPE, v);
         }
         // user headers last, so they override the defaults
-        for (k, v) in self.headers {
+        for (k, v) in headers {
             if let (Ok(name), Ok(value)) =
                 (k.parse::<HeaderName>(), v.parse::<HeaderValue>())
             {

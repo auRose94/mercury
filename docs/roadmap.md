@@ -43,6 +43,7 @@ The core is implemented and tested (`tests/ergonomics.rs`, `tests/serde.rs`,
 | `src/web/html.rs` | HTML5 builder + parser — elements as data (`tag`/`attr`/`items`), escaping, void tags, entity decoding, implicit closes, malformed-input recovery |
 | `src/web/css.rs` | CSS parser — rules + typed declarations, `!important` as `name!` flags, at-rule skipping |
 | `src/web/store.rs` | file-backed document store — collections, `$set`/`$unset`/`$inc`, `$in` queries, `_id` generation |
+| `src/web/database.rs` | the `database` facade — config in, collection handles out |
 | `src/web/http/` | http layer (behind the `web` feature) — `Server` facade (verbs, `:param`/`*` patterns, `ws`, `mount`, `on_error`, `start`/`stop`), `Response`, request staging; `post_var`/`get_var` sugar; axum underneath |
 
 Key design choices:
@@ -94,12 +95,19 @@ The siblings are ported too, always available (pure data, no feature gate):
 void tags, entity decoding, implicit closes, and malformed-input recovery);
 `web::css` — rules with typed declarations and `!important` flags;
 `web::store` — the file-backed document store with `$set`/`$unset`/`$inc`,
-`$in` queries, and Mongo-shaped 24-char ids. Tests are ported from gold's
-`webTest.cpp`.
+`$in` queries, and Mongo-shaped 24-char ids; `web::database` — gold's
+database facade (config in, collection handles out). Tests are ported from
+gold's `webTest.cpp`.
 
-Still to port from gold's web module: streaming responses (`onData`), HTTPS
-(gold's `sslCert`/`sslKey` vhost keys), and the `database` facade over
-multiple store backends.
+Streaming and TLS complete gold's server surface: `Response::stream` (gold's
+`write`/`end` loop — chunked out, the SSE shape), `route_stream` (gold's
+`onData` — async handlers over the raw request-body stream), and the
+`sslCert`/`sslKey` config pair switching the vhost to HTTPS (axum-server's
+rustls transport, verified by a real handshake against a self-signed cert).
+Stop is graceful with a bounded grace period and servers restart in one
+process. Remaining divergences, on purpose: gold's uWS streaming internals
+(`cork`/`onWritable`/`writeContinue`) don't map to hyper, and the `database`
+facade ships only the `"file"` backend, like gold.
 
 - **`hyper`** (or `axum`, which is built on hyper) for the HTTP server — the
   wheel for request/response handling.

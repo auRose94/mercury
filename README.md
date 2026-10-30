@@ -62,10 +62,10 @@ let json = serde_json::to_string(&v).unwrap();
 
 - **Core** — `Var` / `Object` / `List` / `VarRef` / sugar / serde / `Func`. *Done.*
 - **Web** — gold's expressjs-like `Server`: all verbs, `:param`/`*` patterns,
-  WebSocket routes, static mounts, an error hook, graceful start/stop
-  (axum + tokio, behind the `web` feature) — plus the always-on `html`
-  builder/parser, `css` parser, and file-backed `store`. *Done except
-  streaming responses and HTTPS.*
+  WebSocket routes, static mounts, an error hook, streamed bodies, HTTPS,
+  graceful start/stop (axum + tokio, behind the `web` feature) — plus the
+  always-on `html` builder/parser, `css` parser, and file-backed `store`
+  with the `database` facade. *Done.*
 - **Game** — `wgpu` graphics, pump-and-dispatch engine loop. Planned.
 
 See [docs/roadmap.md](docs/roadmap.md) for the full plan and the architecture

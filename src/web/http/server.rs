@@ -17,13 +17,17 @@ use axum::extract::{RawPathParams, RawQuery};
 use axum::http::{HeaderMap, Method, Uri};
 use axum::routing::{delete, get, options, patch, post, put};
 use axum::{body::Bytes, Router};
+use axum_server::Handle;
 use futures_util::{SinkExt, StreamExt};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::mpsc;
 
 use super::{build_req, Response};
 use crate::var::Var;
 
 type RouteHandler = Arc<dyn Fn(Var) -> Response + Send + Sync>;
+
+/// How long `stop()` waits for in-flight requests before force-closing them.
+const GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The parts of the server that handlers touch at request time: the mount
 /// table and the error hook. Shared behind an `Arc` so `start()` can serve
@@ -41,11 +45,14 @@ struct Shared {
 #[derive(Clone)]
 pub struct Server {
     addr: String,
+    /// The `sslCert`/`sslKey` PEM pair — when present, `start()` serves HTTPS
+    /// on the same port (gold's lws vhost behavior).
+    tls: Option<(PathBuf, PathBuf)>,
     router: Router,
     shared: Arc<Shared>,
     /// Graceful-stop signal for the currently running `start()`; `None`
     /// while stopped, replaced on each start so servers restart cleanly.
-    shutdown: Arc<Mutex<Option<watch::Sender<bool>>>>,
+    shutdown: Arc<Mutex<Option<tokio::sync::watch::Sender<bool>>>>,
     /// The addr the running (or last) start() actually bound (resolves `:0`).
     bound: Arc<Mutex<String>>,
 }
@@ -58,13 +65,20 @@ impl Server {
     /// A server on the defaults: `127.0.0.1:8080`.
     pub fn new() -> Self { Self::with_config(()) }
 
-    /// Configure from gold-style data: `o!{ "host": "127.0.0.1", "port": 8080 }`.
-    /// `Null` means defaults. (gold's `sslCert`/`sslKey` vhost keys are not
-    /// supported yet.)
+    /// Configure from gold-style data:
+    /// `o!{ "host": "127.0.0.1", "port": 8080 }`. `Null` means defaults.
+    /// A `"sslCert"`/`"sslKey"` PEM pair switches the vhost to HTTPS.
     pub fn with_config(config: impl Into<Var>) -> Self {
         let cfg = config.into();
         let host = cfg.get("host").as_string().unwrap_or_else(|| "127.0.0.1".to_string());
         let port = cfg.get("port").as_i64().unwrap_or(8080);
+        let tls = match (
+            cfg.get("sslCert").as_string(),
+            cfg.get("sslKey").as_string(),
+        ) {
+            (Some(cert), Some(key)) => Some((PathBuf::from(cert), PathBuf::from(key))),
+            _ => None,
+        };
         let shared = Arc::new(Shared::default());
 
         // Unmatched requests: fall through mounts, then the error hook, then
@@ -104,6 +118,7 @@ impl Server {
 
         Server {
             addr: format!("{host}:{port}"),
+            tls,
             router,
             shared,
             shutdown: Arc::new(Mutex::new(None)),
@@ -176,6 +191,22 @@ impl Server {
         self
     }
 
+    /// Streaming variant of [`route`](Self::route) — gold's `onData`, as a
+    /// Rust stream. The async handler receives the staged request (its
+    /// `body` is `Null`; the raw body is the second argument) and the body
+    /// stream, so uploads can be consumed chunk by chunk without buffering.
+    pub fn route_stream<F, Fut, R>(&mut self, method: &str, pattern: &str, f: F) -> &mut Self
+    where
+        F: Fn(Var, axum::body::Body) -> Fut + Clone + Send + Sync + 'static,
+        Fut: std::future::Future<Output = R> + Send + 'static,
+        R: Into<Response>,
+    {
+        let ap = axum_pattern(pattern);
+        let taken = std::mem::take(&mut self.router);
+        self.router = taken.route(&ap, method_router_stream(method, f));
+        self
+    }
+
     /// Buffer a WebSocket route (gold's `ws(pattern, {open, message, close})`):
     /// `open(sock)` fires on connect, `message(sock, data)` per text message,
     /// `close(sock)` on teardown. Push with `sock.send(...)` from any of them.
@@ -214,29 +245,73 @@ impl Server {
 
     /// Blocking: binds and runs until [`stop()`](Self::stop). Returns an
     /// error when the bind fails instead of entering the loop; safe to call
-    /// again after a stop (gold's restartable server).
+    /// again after a stop (gold's restartable server). With a
+    /// `sslCert`/`sslKey` config pair, the same port serves HTTPS.
     pub async fn start(&self) -> std::io::Result<()> {
+        // clear the stale addr so `local_addr()` polling reflects THIS bind
+        *self.bound.lock().unwrap() = String::new();
         let listener = tokio::net::TcpListener::bind(&self.addr).await?;
-        if let Ok(a) = listener.local_addr() {
-            *self.bound.lock().unwrap() = a.to_string();
+        let addr = listener.local_addr()?;
+        *self.bound.lock().unwrap() = addr.to_string();
+        let handle = Handle::new();
+        let (stop_tx, mut stop_rx) = tokio::sync::watch::channel(false);
+        *self.shutdown.lock().unwrap() = Some(stop_tx);
+        let std_listener = listener.into_std()?;
+
+        // The serve future itself, HTTP or HTTPS per the config pair.
+        let serve = async {
+            match &self.tls {
+                Some((cert, key)) => {
+                    let config = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key)
+                        .await?;
+                    axum_server::from_tcp_rustls(std_listener, config)
+                        .handle(handle.clone())
+                        .serve(self.router.clone().into_make_service())
+                        .await
+                }
+                None => {
+                    axum_server::from_tcp(std_listener)
+                        .handle(handle.clone())
+                        .serve(self.router.clone().into_make_service())
+                        .await
+                }
+            }
+        };
+
+        // Shutdown on OUR signal (a watch — axum-server's own notify-based
+        // signal can be missed between accept-loop iterations), then drain
+        // in-flight requests by polling the connection count (also race-free)
+        // and force-close whatever is left when the grace period runs out.
+        let shutdown = async {
+            while !*stop_rx.borrow_and_update() {
+                if stop_rx.changed().await.is_err() {
+                    break; // the Server was dropped: shut down with it
+                }
+            }
+            handle.graceful_shutdown(Some(GRACE_PERIOD));
+            let deadline = std::time::Instant::now() + GRACE_PERIOD;
+            while handle.connection_count() > 0 && std::time::Instant::now() < deadline {
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+            handle.shutdown();
+        };
+
+        tokio::select! {
+            out = serve => out,
+            _ = shutdown => Ok(()),
         }
-        let (tx, mut rx) = watch::channel(false);
-        *self.shutdown.lock().unwrap() = Some(tx);
-        axum::serve(listener, self.router.clone())
-            .with_graceful_shutdown(async move {
-                let _ = rx.changed().await;
-            })
-            .await
     }
 
     /// Request a graceful stop of a running `start()`; safe from any thread.
+    /// In-flight requests get a grace period, then the loop returns anyway —
+    /// gold's stop-makes-the-loop-return, with a bounded worst case.
     /// Returns false when nothing is running.
     pub fn stop(&self) -> bool {
         self.shutdown
             .lock()
             .unwrap()
             .take()
-            .map(|tx| tx.send(true).is_ok())
+            .map(|stop_tx| stop_tx.send(true).is_ok())
             .unwrap_or(false)
     }
 
@@ -287,6 +362,23 @@ fn method_router(method: &str, handler: RouteHandler) -> axum::routing::MethodRo
     }
 }
 
+fn method_router_stream<F, Fut, R>(method: &str, f: F) -> axum::routing::MethodRouter
+where
+    F: Fn(Var, axum::body::Body) -> Fut + Clone + Send + Sync + 'static,
+    Fut: std::future::Future<Output = R> + Send + 'static,
+    R: Into<Response>,
+{
+    match method.to_ascii_uppercase().as_str() {
+        "GET" => get(stage_req_stream(f)),
+        "POST" => post(stage_req_stream(f)),
+        "PUT" => put(stage_req_stream(f)),
+        "PATCH" => patch(stage_req_stream(f)),
+        "DELETE" => delete(stage_req_stream(f)),
+        "OPTIONS" => options(stage_req_stream(f)),
+        other => panic!("unsupported HTTP method {other:?}"),
+    }
+}
+
 /// Wrap a `Var -> Response` handler in the extractor tuple every route
 /// shares. The handler runs synchronously inside the async block (handlers
 /// are quick in-memory transforms; async handlers are a future step). The
@@ -302,6 +394,32 @@ fn stage_req(
         let params = params.iter().map(|(k, v)| (k.to_string(), v.to_string()));
         let req = build_req(&method, &uri, params, query.0.as_deref(), &headers, &bytes);
         std::future::ready(handler(req))
+    }
+}
+
+/// The streaming flavor of [`stage_req`]: the handler is async and receives
+/// the raw body stream as its second argument.
+fn stage_req_stream<F, Fut, R>(
+    f: F,
+) -> impl Fn(Method, Uri, RawPathParams, RawQuery, HeaderMap, axum::body::Body)
+    -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>>
++ Clone
++ Send
++ Sync
++ 'static
+where
+    F: Fn(Var, axum::body::Body) -> Fut + Clone + Send + Sync + 'static,
+    Fut: std::future::Future<Output = R> + Send + 'static,
+    R: Into<Response>,
+{
+    move |method, uri, params: RawPathParams, query: RawQuery, headers: HeaderMap, body: axum::body::Body| {
+        let f = f.clone();
+        Box::pin(async move {
+            let params = params.iter().map(|(k, v)| (k.to_string(), v.to_string()));
+            let req = build_req(&method, &uri, params, query.0.as_deref(), &headers, &[]);
+            req.set("body", Var::Null); // the raw body is the stream argument
+            f(req, body).await.into()
+        })
     }
 }
 

@@ -24,14 +24,17 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 axum = { version = "0.8", features = ["ws"], optional = true }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "time"], optional = true }
-# http internals: ws send/receive streams
+# http internals: chunked/ws streams, HTTPS transport (gold's lws sslCert/sslKey)
 futures-util = { version = "0.3", optional = true }
+axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }
+rustls = { version = "0.23", features = ["ring"], optional = true }
+tokio-rustls = { version = "0.26", optional = true }
 
 [features]
 default = []
-# web: the http layer (Server/Response/ws). Optional so the core + parsers
-# + store stay lean for embedding (Bevy etc.).
-web = ["dep:axum", "dep:tokio", "dep:futures-util"]
+# web: the http layer (Server/Response/ws/https). Optional so the core +
+# parsers + store stay lean for embedding (Bevy etc.).
+web = ["dep:axum", "dep:tokio", "dep:futures-util", "dep:axum-server", "dep:rustls", "dep:tokio-rustls"]
 
 [dev-dependencies]
 serde_json = "1"
@@ -41,6 +44,8 @@ tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
+# self-signed certs for the HTTPS tests
+rcgen = "0.13"
 
 [[example]]
 name = "web_demo"

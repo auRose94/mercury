@@ -31,7 +31,28 @@ async fn try_http(addr: &str, raw: &str) -> Option<(u16, String, String)> {
         .nth(1)
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
-    Some((status, head.to_string(), body.to_string()))
+    // chunked transfer framing is transparent to real clients; decode it
+    let body = if head.to_ascii_lowercase().contains("transfer-encoding: chunked") {
+        decode_chunked(body)
+    } else {
+        body.to_string()
+    };
+    Some((status, head.to_string(), body))
+}
+
+/// De-chunk a chunked-transfer body (`6\r\nhello \r\n0\r\n\r\n` → `hello `).
+fn decode_chunked(body: &str) -> String {
+    let mut out = String::new();
+    let mut rest = body;
+    while let Some((size_line, after)) = rest.split_once("\r\n") {
+        let Ok(size) = usize::from_str_radix(size_line.trim(), 16) else { break };
+        if size == 0 || after.len() < size {
+            break;
+        }
+        out.push_str(&after[..size]);
+        rest = after[size..].strip_prefix("\r\n").unwrap_or(&after[size..]);
+    }
+    out
 }
 
 async fn http(addr: &str, raw: &str) -> (u16, String, String) {
@@ -53,12 +74,10 @@ fn post(path: &str, ct: &str, body: &str) -> String {
     )
 }
 
-/// Spawn `start()` on a clone (clones share the stop signal), wait for the
-/// bind, return the resolved addr.
-async fn boot(serv: &Server) -> String {
-    let s = serv.clone();
-    tokio::spawn(async move { let _ = s.start().await; });
-    for _ in 0..200 {
+/// Wait for the (already spawned) `start()` to bind; return the resolved
+/// addr. Bounded: panics rather than polling forever.
+async fn wait_bound(serv: &Server) -> String {
+    for _ in 0..100 {
         let addr = serv.local_addr();
         if !addr.is_empty() {
             return addr;
@@ -66,6 +85,16 @@ async fn boot(serv: &Server) -> String {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     panic!("server did not bind in time");
+}
+
+/// Spawn `start()` on a clone (clones share the stop signal), wait for the
+/// bind, return the resolved addr. Spawn the task yourself instead when you
+/// need the task handle (the graceful test) — spawning twice runs two
+/// servers on one `Server`.
+async fn boot(serv: &Server) -> String {
+    let s = serv.clone();
+    tokio::spawn(async move { let _ = s.start().await; });
+    wait_bound(serv).await
 }
 
 fn ephemeral() -> Server {
@@ -267,41 +296,106 @@ async fn websocket_echo() {
     ws.close(None).await.unwrap();
 }
 
+// ---- streaming (gold's onData / write) ----
+
+#[tokio::test(flavor = "multi_thread")]
+async fn request_streaming_route() {
+    let mut serv = ephemeral();
+    serv.route_stream("POST", "/upload", |req, body| async move {
+        use futures_util::StreamExt;
+        // the staged request carries no body — the stream is the argument
+        let body_is_null = req.get("body").ty() == mercury::Ty::Null;
+        let mut total = 0usize;
+        let mut body = body.into_data_stream();
+        while let Some(Ok(chunk)) = body.next().await {
+            total += chunk.len();
+        }
+        Response::json(o!{
+            "bytes": total,
+            "body_is_null": body_is_null,
+        })
+    });
+    let addr = boot(&serv).await;
+
+    let payload = "x".repeat(64);
+    let (st, _, resp) = http(&addr, &post("/upload", "application/octet-stream", &payload)).await;
+    assert_eq!(st, 200);
+    assert!(resp.contains(r#""bytes":64"#), "{resp}");
+    assert!(resp.contains(r#""body_is_null":true"#), "{resp}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn response_streaming_chunks() {
+    let mut serv = ephemeral();
+    serv.get("/stream", |_req| {
+        let frames: Vec<Result<axum::body::Bytes, std::io::Error>> = vec![
+            Ok("one ".into()),
+            Ok("two ".into()),
+            Ok("three".into()),
+        ];
+        Response::stream(futures_util::stream::iter(frames)).ct("text/plain")
+    });
+    let addr = boot(&serv).await;
+
+    let (st, head, body) = http(&addr, &get("/stream")).await;
+    assert_eq!(st, 200);
+    assert_eq!(body, "one two three");
+    assert!(head.to_ascii_lowercase().contains("text/plain"), "{}", head);
+}
+
 // ---- lifecycle: graceful stop, restart (gold's restartable server) ----
 
 #[tokio::test(flavor = "multi_thread")]
 async fn graceful_stop_and_restart() {
+    // every task await below is time-bounded: a wedged shutdown fails the
+    // test loudly instead of hanging the suite
+    const BOUND: Duration = Duration::from_secs(30);
+
     let mut serv = ephemeral();
     serv.get("/", |_req| "up");
 
     let s = serv.clone();
-    let task = tokio::spawn(async move { s.start().await });
-    let addr = boot(&serv).await;
-
+    let first = tokio::spawn(async move { s.start().await });
+    let addr = wait_bound(&serv).await;
     let (st, _, body) = http(&addr, &get("/")).await;
     assert_eq!((st, body.as_str()), (200, "up"));
 
     assert!(serv.stop());
     // start() returns once the loop exits; a second stop has nothing to stop
-    assert_eq!(task.await.unwrap().unwrap(), ());
+    tokio::time::timeout(BOUND, first)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
     assert!(!serv.stop());
 
-    // restart in the same process — gold's server loop story
+    // restart in the same process — gold's server loop story. local_addr may
+    // briefly still show the OLD bind, so poll tolerantly until THIS server
+    // answers, then pin the addr for the strict request.
     let s = serv.clone();
-    tokio::spawn(async move { let _ = s.start().await; });
+    let second = tokio::spawn(async move { s.start().await });
+    let mut addr = String::new();
     for _ in 0..200 {
-        let addr = serv.local_addr();
-        if !addr.is_empty() {
-            if let Some((st, _, body)) = try_http(&addr, &get("/")).await {
+        let a = serv.local_addr();
+        if !a.is_empty() {
+            if let Some((st, _, body)) = try_http(&a, &get("/")).await {
                 if st == 200 && body == "up" {
+                    addr = a;
                     break;
                 }
             }
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    let addr = serv.local_addr();
+    assert!(!addr.is_empty(), "restarted server did not come up in time");
+
     let (st, _, body) = http(&addr, &get("/")).await;
     assert_eq!((st, body.as_str()), (200, "up"));
-    serv.stop();
+
+    assert!(serv.stop());
+    tokio::time::timeout(BOUND, second)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
 }

@@ -48,6 +48,8 @@ pub enum StoreError {
     NotFound,
     /// The document argument wasn't an object.
     NotADocument,
+    /// A `database` config asked for a backend that doesn't exist.
+    UnknownBackend(String),
 }
 
 impl std::fmt::Display for StoreError {
@@ -60,6 +62,7 @@ impl std::fmt::Display for StoreError {
             }
             StoreError::NotFound => write!(f, "no matching document"),
             StoreError::NotADocument => write!(f, "document must be an object"),
+            StoreError::UnknownBackend(name) => write!(f, "unknown backend {name:?}"),
         }
     }
 }
@@ -83,6 +86,7 @@ fn fresh_id() -> String {
 }
 
 /// A file-backed store: `path/name/{collection}/{_id}.json`.
+#[derive(Clone)]
 pub struct Store {
     root: PathBuf,
 }
@@ -100,6 +104,19 @@ impl Store {
     /// Create a collection directory.
     pub fn create_collection(&self, coll: &str) -> std::io::Result<()> {
         std::fs::create_dir_all(self.coll_dir(coll))
+    }
+
+    /// Collections materialize on first write, Mongo-style.
+    fn ensure_coll(&self, coll: &str) -> std::io::Result<()> {
+        std::fs::create_dir_all(self.coll_dir(coll))
+    }
+
+    fn write_doc(&self, coll: &str, id: &str, v: &Var) -> Result<(), StoreError> {
+        self.ensure_coll(coll)?;
+        Ok(write_json(
+            &self.coll_dir(coll).join(format!("{id}.json")),
+            v,
+        )?)
     }
 
     /// Insert a document (object). A missing `_id` is generated; an existing
@@ -124,7 +141,7 @@ impl Store {
                 id
             }
         };
-        write_json(&self.coll_dir(coll).join(format!("{id}.json")), &Var::from(out.clone()))?;
+        self.write_doc(coll, &id, &Var::from(out.clone()))?;
         Ok(Var::from(out))
     }
 
@@ -247,6 +264,7 @@ impl Store {
     /// that never appears as a document).
     pub fn add_indexes(&self, coll: &str, spec: impl Into<Var>) -> std::io::Result<()> {
         let spec = spec.into();
+        self.ensure_coll(coll)?;
         write_json(&self.coll_dir(coll).join(".index.json"), &spec)
     }
 
