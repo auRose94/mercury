@@ -5,6 +5,9 @@ edition = "2021"
 description = "Mercury — a Rust reimagining of gold: JS-like dynamic values (var) with copy-on-write ergonomics, plus the sugar that makes prototyping feel like JavaScript."
 license = "MIT"
 
+[workspace]
+members = ["derive"]
+
 # Dependencies:
 # - indexmap: gold's object preserves insertion order; indexmap is the wheel
 #   for that — no hand-rolled ordered map.
@@ -20,6 +23,8 @@ license = "MIT"
 [dependencies]
 indexmap = "2"
 serde = { version = "1", features = ["derive"] }
+# FromVar: the typed hot-path seam (re-exported as mercury::FromVar)
+mercury-derive = { path = "derive", version = "0.1.0" }
 # store documents are JSON files; http responses are JSON
 serde_json = "1"
 axum = { version = "0.8", features = ["ws"], optional = true }

@@ -1,0 +1,110 @@
+//! Entities — gold's `entity`: a transform, components, and child entities,
+//! enable/disable included.
+
+use super::component::Component;
+use super::transform::Transform;
+
+/// A component plus its engine bookkeeping (initialization state).
+pub struct ComponentSlot {
+    pub(crate) component: Box<dyn Component>,
+    pub(crate) initialized: bool,
+}
+
+/// A node in the scene: transform, components, children (gold's `entity`).
+/// Disabled entities skip their components entirely (and their subtrees).
+pub struct Entity {
+    name: String,
+    transform: Transform,
+    components: Vec<ComponentSlot>,
+    children: Vec<Entity>,
+    enabled: bool,
+}
+
+impl Entity {
+    pub fn new(name: impl Into<String>) -> Entity {
+        Entity {
+            name: name.into(),
+            transform: Transform::default(),
+            components: Vec::new(),
+            children: Vec::new(),
+            enabled: true,
+        }
+    }
+
+    pub fn name(&self) -> &str { &self.name }
+
+    pub fn transform(&self) -> &Transform { &self.transform }
+
+    pub fn transform_mut(&mut self) -> &mut Transform { &mut self.transform }
+
+    /// Attach a component (gold's `entity += [entity, component]`).
+    pub fn add_component(&mut self, component: Box<dyn Component>) -> &mut Self {
+        self.components.push(ComponentSlot { component, initialized: false });
+        self
+    }
+
+    /// Attach a child entity (gold's `entity += [child, ...]`).
+    pub fn add_child(&mut self, child: Entity) -> &mut Self {
+        self.children.push(child);
+        self
+    }
+
+    pub fn children(&self) -> &[Entity] { &self.children }
+
+    pub fn enabled(&self) -> bool { self.enabled }
+
+    pub fn set_enabled(&mut self, enabled: bool) { self.enabled = enabled; }
+
+    /// Typed component lookup (gold's `getComponent(prototype)`, as
+    /// downcasting): the first component of type `T` on this entity.
+    pub fn get_component<T: Component + 'static>(&self) -> Option<&T> {
+        self.components
+            .iter()
+            .find_map(|slot| slot.component.as_any().downcast_ref::<T>())
+    }
+
+    /// All components of type `T`, including children's (gold's
+    /// `getComponentsRecursive`).
+    pub fn get_components_recursive<T: Component + 'static>(&self) -> Vec<&T> {
+        let mut found: Vec<&T> = self
+            .components
+            .iter()
+            .filter_map(|slot| slot.component.as_any().downcast_ref::<T>())
+            .collect();
+        for child in &self.children {
+            found.extend(child.get_components_recursive::<T>());
+        }
+        found
+    }
+
+    /// The slot at a tree path (`[entity_slot, child_idx, child_slot, …]`).
+    pub(crate) fn slot_at_mut(&mut self, path: &[usize]) -> &mut ComponentSlot {
+        match path {
+            [i] => &mut self.components[*i],
+            [child_idx, rest @ ..] => self.children[*child_idx].slot_at_mut(rest),
+            [] => unreachable!("empty slot path"),
+        }
+    }
+
+    /// Collect `(priority, tree-path)` for every component in the subtree,
+    /// pre-order; the engine sorts the flat list (gold's `sortComponents`).
+    pub(crate) fn collect_order(
+        &self,
+        path: &mut Vec<usize>,
+        out: &mut Vec<(i64, Vec<usize>)>,
+    ) {
+        if !self.enabled {
+            return;
+        }
+        for (i, slot) in self.components.iter().enumerate() {
+            path.push(i);
+            out.push((slot.component.priority().value(), path.clone()));
+            path.pop();
+        }
+        for (ci, child) in self.children.iter().enumerate() {
+            path.push(ci);
+            child.collect_order(path, out);
+            path.pop();
+        }
+    }
+}

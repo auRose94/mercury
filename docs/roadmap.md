@@ -45,6 +45,8 @@ The core is implemented and tested (`tests/ergonomics.rs`, `tests/serde.rs`,
 | `src/web/store.rs` | file-backed document store — collections, `$set`/`$unset`/`$inc`, `$in` queries, `_id` generation |
 | `src/web/database.rs` | the `database` facade — config in, collection handles out |
 | `src/web/http/` | http layer (behind the `web` feature) — `Server` facade (verbs, `:param`/`*` patterns, `ws`, `mount`, `on_error`, `start`/`stop`), `Response`, request staging; `post_var`/`get_var` sugar; axum underneath |
+| `src/from_var.rs` + `derive/` | `FromVar` — the typed hot-path seam: `#[derive(FromVar)]` turns a `Var` object into a strict, path-tracked struct |
+| `src/game/` | game module — `Engine` (gold's pump), `Component` (priority tiers), `Entity`/`Transform` (scene tree), `WindowSystem` registry + `HeadlessWindow` |
 
 Key design choices:
 
@@ -68,9 +70,13 @@ rather than reinventing wheels.
 
 ### 1. Core (done) → harden
 
-- wgpu-free today; the core is pure data. Next: a `FromVar` derive macro —
-  the Rust-native answer to "script ergonomics + native speed": derive a
-  typed struct from a `Var` for the hot path.
+- wgpu-free today; the core is pure data.
+- `FromVar` (done): the typed hot-path seam — `#[derive(FromVar)]` turns a
+  `Var` object into a plain struct with strict, path-tracked reads
+  (`"user.stats.score": expected int, found string`), `rename`/`default`
+  field options, and `Option`/`Vec`/nested-struct support. Prototyping code
+  passes `Var`; the hot loop works with real types. Lives in the
+  `mercury-derive` proc-macro crate, re-exported at `mercury::FromVar`.
 - Functions (done): `Func` carries a stable id, so `Var` equality compares
   functions by id — clones equal their original; fresh functions never compare
   equal. Still open: the id→Func registry for serde round-tripping.
@@ -121,14 +127,26 @@ facade ships only the `"file"` backend, like gold.
 
 ### 3. Game module
 
-- **`wgpu`** for graphics — deliberately *not* bgfx. wgpu is the modern Rust
-  native, cross-platform, WebGPU-adjacent choice. Targeting one backend means
-  we never maintain a dozen graphics backends again.
-- The engine loop stays a plain pump + dispatch (gold's design): events,
-  handlers, and results cross boundaries as `Var`, so there's no platform
-  switch in the loop.
-- Physics/other subsystems follow gold's registered-backend pattern but as
-  Rust traits + `register`/`create` registries.
+Ported from gold's `game` module, headless first (gold ships a
+`windowSystemHeadless` too — the whole loop runs and tests without a GPU):
+
+- **Engine** — the pump + dispatch loop, gold's exact frame: poll window
+  events (`quit` stops the loop after the in-flight frame), sort + init
+  components, priority-ordered `update(dt)`, the draw pass, then the
+  frame-rate cap. `update()`/`draw()` are public so headless code and tests
+  drive frames without a window. Settings ride the same JSON seam.
+- **Component** — gold's priority tiers (high/data/physics/generic/draw,
+  custom values in user space) with `initialize`/`update`/`draw` hooks, as
+  a Rust trait; typed lookup by downcasting.
+- **Entity/Transform** — the scene tree: transforms (position/rotation/
+  scale) composing parent-first down the hierarchy, enable/disable.
+- **Backends** — gold's registered-backend pattern as Rust traits and a
+  register/create registry; `headless` is pre-registered, events cross the
+  boundary as `Var` (`o!{ "type": "quit" }`).
+
+Next: the wgpu render backend behind the same registry, then the physics
+world (gold's `world` step/gravity/raytrace), then the interpreter seam so
+components can be scripted.
 
 ### Scripting layer (cross-cutting)
 

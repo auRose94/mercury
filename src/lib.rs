@@ -31,6 +31,8 @@
 //! Payloads are `Arc<Mutex>`-shared, so the whole value graph is `Send +
 //! Sync`: the same `Var` crosses threads, async tasks, and web handlers.
 
+pub mod from_var;
+pub mod game;
 pub mod list;
 pub mod object;
 pub mod proxy;
@@ -38,7 +40,9 @@ pub mod sugar;
 pub mod var;
 pub mod web;
 
+pub use from_var::{FromVar, FromVarError};
 pub use list::List;
+pub use mercury_derive::FromVar;
 pub use object::Object;
 pub use proxy::VarRef;
 pub use var::{Func, Null, Quat, Ty, Var, Vec3, Vec4};

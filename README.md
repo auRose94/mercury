@@ -60,13 +60,16 @@ let json = serde_json::to_string(&v).unwrap();
 
 ## Modules
 
-- **Core** — `Var` / `Object` / `List` / `VarRef` / sugar / serde / `Func`. *Done.*
+- **Core** — `Var` / `Object` / `List` / `VarRef` / sugar / serde / `Func` /
+  `#[derive(FromVar)]`. *Done.*
 - **Web** — gold's expressjs-like `Server`: all verbs, `:param`/`*` patterns,
   WebSocket routes, static mounts, an error hook, streamed bodies, HTTPS,
   graceful start/stop (axum + tokio, behind the `web` feature) — plus the
   always-on `html` builder/parser, `css` parser, and file-backed `store`
   with the `database` facade. *Done.*
-- **Game** — `wgpu` graphics, pump-and-dispatch engine loop. Planned.
+- **Game** — the engine core, headless-first: gold's pump + dispatch,
+  priority-tiered components, entity/transform scene tree, backend
+  registries, events as `Var`. wgpu render backend next.
 
 See [docs/roadmap.md](docs/roadmap.md) for the full plan and the architecture
 decisions (why `Arc<Mutex>`, why serde, why not Bevy).

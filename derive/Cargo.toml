@@ -1,0 +1,14 @@
+[package]
+name = "mercury-derive"
+version = "0.1.0"
+edition = "2021"
+description = "Derive macros for Mercury — FromVar turns a Var object into a typed struct for the hot path."
+license = "MIT"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "2"
+quote = "1"
+proc-macro2 = "1"
