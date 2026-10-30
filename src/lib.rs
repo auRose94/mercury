@@ -36,7 +36,6 @@ pub mod object;
 pub mod proxy;
 pub mod sugar;
 pub mod var;
-#[cfg(feature = "web")]
 pub mod web;
 
 pub use list::List;

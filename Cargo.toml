@@ -20,17 +20,18 @@ license = "MIT"
 [dependencies]
 indexmap = "2"
 serde = { version = "1", features = ["derive"] }
+# store documents are JSON files; http responses are JSON
+serde_json = "1"
 axum = { version = "0.8", features = ["ws"], optional = true }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "time"], optional = true }
-# web feature internals: JSON responses, ws send/receive streams
-serde_json = { version = "1", optional = true }
+# http internals: ws send/receive streams
 futures-util = { version = "0.3", optional = true }
 
 [features]
 default = []
-# web: the expressjs-like layer. Optional so the core stays lean for
-# embedding (Bevy etc.).
-web = ["dep:axum", "dep:tokio", "dep:serde_json", "dep:futures-util"]
+# web: the http layer (Server/Response/ws). Optional so the core + parsers
+# + store stay lean for embedding (Bevy etc.).
+web = ["dep:axum", "dep:tokio", "dep:futures-util"]
 
 [dev-dependencies]
 serde_json = "1"

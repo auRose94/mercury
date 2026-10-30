@@ -30,8 +30,8 @@ copy JavaScript:
 ## Current state — Core module
 
 The core is implemented and tested (`tests/ergonomics.rs`, `tests/serde.rs`,
-`tests/func.rs`, `tests/threads.rs`; the web layer in `tests/web.rs` and
-`tests/web_server.rs`):
+`tests/func.rs`, `tests/threads.rs`; the web layer in `tests/web.rs`,
+`tests/web_server.rs`, `tests/html.rs`, `tests/css.rs`, `tests/store.rs`):
 
 | File | What |
 | --- | --- |
@@ -40,7 +40,10 @@ The core is implemented and tested (`tests/ergonomics.rs`, `tests/serde.rs`,
 | `src/list.rs` | `List` — ordered array, grows-with-nulls on index-set |
 | `src/proxy.rs` | `VarRef` — write-back proxy (`v.at("k").put(5)`), mutates the shared value in place |
 | `src/sugar.rs` | `o!{}`, `a![]`, `tpl!`, `func!`, `each`/`map`/`filter`/`find`/`join` |
-| `src/web/` | web layer (behind the `web` feature) — `Server` facade (verbs, `:param`/`*` patterns, `ws`, `mount`, `on_error`, `start`/`stop`), `Response`, request staging; `post_var`/`get_var` sugar; axum underneath |
+| `src/web/html.rs` | HTML5 builder + parser — elements as data (`tag`/`attr`/`items`), escaping, void tags, entity decoding, implicit closes, malformed-input recovery |
+| `src/web/css.rs` | CSS parser — rules + typed declarations, `!important` as `name!` flags, at-rule skipping |
+| `src/web/store.rs` | file-backed document store — collections, `$set`/`$unset`/`$inc`, `$in` queries, `_id` generation |
+| `src/web/http/` | http layer (behind the `web` feature) — `Server` facade (verbs, `:param`/`*` patterns, `ws`, `mount`, `on_error`, `start`/`stop`), `Response`, request staging; `post_var`/`get_var` sugar; axum underneath |
 
 Key design choices:
 
@@ -76,17 +79,27 @@ rather than reinventing wheels.
 gold had a web/UI layer; Mercury's web layer leans on Rust's mature HTTP
 ecosystem instead of reinventing it.
 
-*Server facade (gold parity):* `mercury::web` behind the `web` feature mirrors
-gold's `web::server` — `get`/`post`/`put`/`patch`/`delete`/`options` routes
-with `:param` and trailing-`*` patterns (gold's uWS conventions), requests
-staged as `Var` (`method`/`path`/`params`/`query`/`headers` + a body parsed by
-content type), `ws` routes with `open`/`message`/`close` and a `send`/`close`
-socket handle, static-file `mount`s with mime detection, an `on_error` hook
-for the 404 page, and graceful, restartable `start()`/`stop()`. Tests drive
-real HTTP and WebSocket wire traffic; `examples/web_site.rs` is a multi-page
-homage to gold's `myWebProject`. Still to port from gold's web module: the
-HTML builder/parser, the CSS parser, the file-backed dataStore, streaming
-responses (`onData`), and HTTPS (gold's `sslCert`/`sslKey` vhost keys).
+*Server facade (gold parity) + the sibling parsers/store:* `mercury::web`
+mirrors gold's `web::server` — `get`/`post`/`put`/`patch`/`delete`/`options`
+routes with `:param` and trailing-`*` patterns (gold's uWS conventions),
+requests staged as `Var` (`method`/`path`/`params`/`query`/`headers` + a body
+parsed by content type), `ws` routes with `open`/`message`/`close` and a
+`send`/`close` socket handle, static-file `mount`s with mime detection, an
+`on_error` hook for the 404 page, and graceful, restartable `start()`/`stop()`.
+Tests drive real HTTP and WebSocket wire traffic; `examples/web_site.rs` is a
+multi-page homage to gold's `myWebProject`, built with the HTML builder.
+
+The siblings are ported too, always available (pure data, no feature gate):
+`web::html` — the HTML5 builder + parser (gold's `iHTML`/`Parser`, including
+void tags, entity decoding, implicit closes, and malformed-input recovery);
+`web::css` — rules with typed declarations and `!important` flags;
+`web::store` — the file-backed document store with `$set`/`$unset`/`$inc`,
+`$in` queries, and Mongo-shaped 24-char ids. Tests are ported from gold's
+`webTest.cpp`.
+
+Still to port from gold's web module: streaming responses (`onData`), HTTPS
+(gold's `sslCert`/`sslKey` vhost keys), and the `database` facade over
+multiple store backends.
 
 - **`hyper`** (or `axum`, which is built on hyper) for the HTTP server — the
   wheel for request/response handling.
