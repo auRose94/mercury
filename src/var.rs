@@ -1,15 +1,18 @@
 //! `Var` — the universal dynamic value, a Rust reimagining of gold's `var`.
 //!
-//! Copy-on-write: `List`/`Object` payloads are shared through `Rc<RefCell<…>>`,
+//! Copy-on-write: `List`/`Object` payloads are shared through `Arc<Mutex<…>>`,
 //! so passing a `Var` by value is a cheap pointer bump, exactly like gold's
-//! `shared_ptr`-backed `var`. Because the payload uses interior mutability, a
-//! write through one handle is visible through every other handle that shares
-//! it — which is what lets the `VarRef` proxy mutate the original in place,
-//! faithfully reproducing gold's `varRef`.
+//! `shared_ptr`-backed `var`. Because the payload is interior-mutable, a write
+//! through one handle is visible through every other handle that shares it —
+//! which is what lets the `VarRef` proxy mutate the original in place,
+//! faithfully reproducing gold's `varRef`. `Arc`/`Mutex` (rather than
+//! `Rc`/`RefCell`) makes the whole value graph `Send + Sync`: the same `Var`
+//! crosses threads, async tasks, and route handlers.
 
 use std::fmt;
 use std::ops::{Add, Div, Mul, Neg, Sub};
-use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::list::List;
 use crate::object::Object;
@@ -86,6 +89,68 @@ impl Quat {
     pub fn new(x: f32, y: f32, z: f32, w: f32) -> Self { Quat { x, y, z, w } }
 }
 
+/// Global counter handing out unique function ids. `Relaxed` is enough — ids
+/// only need to be distinct, never ordered.
+static FUNC_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+/// A function body: takes the argument list, produces a `Var`.
+type FuncBody = Arc<dyn Fn(&[Var]) -> Var + Send + Sync>;
+
+/// An id-bearing function value — Mercury's `func`, the gold `func` equivalent.
+///
+/// A `Func` wraps a closure *and* carries a stable id. That id is the workaround
+/// for the fact that closures have no inspectable identity: two functions can be
+/// told apart (compared, shown in debug output) even though their bodies can't
+/// be compared. The body is shared through an `Arc`, so cloning a `Func` is a
+/// cheap pointer bump.
+pub struct Func {
+    id: u64,
+    body: FuncBody,
+}
+
+impl Func {
+    /// Wrap a closure, assigning it a fresh, process-unique id. The closure
+    /// must be `Send + Sync` — functions cross threads like every other `Var`.
+    pub fn new(f: impl Fn(&[Var]) -> Var + Send + Sync + 'static) -> Self {
+        Func {
+            id: FUNC_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
+            body: Arc::new(f),
+        }
+    }
+
+    /// The stable id of this function.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// Call the function with `args`.
+    pub fn call(&self, args: &[Var]) -> Var {
+        (self.body)(args)
+    }
+}
+
+impl Clone for Func {
+    fn clone(&self) -> Self {
+        Func {
+            id: self.id,
+            body: Arc::clone(&self.body),
+        }
+    }
+}
+
+impl PartialEq for Func {
+    fn eq(&self, other: &Self) -> bool {
+        // Functions compare by id — the only identity we can inspect.
+        self.id == other.id
+    }
+}
+
+impl std::fmt::Debug for Func {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Func").field("id", &self.id).finish()
+    }
+}
+
 /// The universal dynamic value.
 ///
 /// ```
@@ -94,10 +159,6 @@ impl Quat {
 /// assert_eq!(v.as_i64(), Some(42));
 /// assert_eq!(v.ty(), mercury::Ty::I64);
 /// ```
-/// A type-erased, reference-counted function: `Rc<dyn Fn(&[Var]) -> Var>`.
-/// This is Mercury's `func` — the gold `func` equivalent.
-type Func = Rc<dyn Fn(&[Var]) -> Var>;
-
 #[derive(Clone)]
 pub enum Var {
     Null,
@@ -123,7 +184,7 @@ impl std::fmt::Debug for Var {
             Var::Str(s) => f.debug_tuple("Str").field(s).finish(),
             Var::List(l) => f.debug_tuple("List").field(l).finish(),
             Var::Object(o) => f.debug_tuple("Object").field(o).finish(),
-            Var::Func(_) => f.write_str("Func(<fn>)"),
+            Var::Func(func) => std::fmt::Debug::fmt(func, f),
             Var::Vec3(v) => f.debug_tuple("Vec3").field(v).finish(),
             Var::Vec4(v) => f.debug_tuple("Vec4").field(v).finish(),
             Var::Quat(v) => f.debug_tuple("Quat").field(v).finish(),
@@ -144,8 +205,8 @@ impl PartialEq for Var {
             (Var::Vec3(a), Var::Vec3(b)) => a == b,
             (Var::Vec4(a), Var::Vec4(b)) => a == b,
             (Var::Quat(a), Var::Quat(b)) => a == b,
-            // functions can't be compared for equality (closures have no
-            // identity we can inspect), so treat them as unequal.
+            // functions compare by id — clones share it, fresh Funcs never collide
+            (Var::Func(a), Var::Func(b)) => a == b,
             _ => false,
         }
     }
@@ -321,7 +382,7 @@ impl Var {
     // ---- call (gold's var operator()) ----
     pub fn call(&self, args: &[Var]) -> Var {
         match self {
-            Var::Func(f) => f(args),
+            Var::Func(f) => f.call(args),
             _ => panic!("cannot call non-function {}", self.ty()),
         }
     }
@@ -342,7 +403,7 @@ impl fmt::Display for Var {
             Var::Quat(v) => write!(f, "quat({}, {}, {}, {})", v.x, v.y, v.z, v.w),
             Var::List(_) => f.write_str("[...]"),
             Var::Object(_) => f.write_str("{...}"),
-            Var::Func(_) => f.write_str("<function>"),
+            Var::Func(func) => write!(f, "<function {}>", func.id()),
         }
     }
 }
@@ -424,6 +485,7 @@ impl From<bool> for Var { fn from(b: bool) -> Self { Var::Bool(b) } }
 impl From<i64> for Var { fn from(n: i64) -> Self { Var::I64(n) } }
 impl From<i32> for Var { fn from(n: i32) -> Self { Var::I64(n as i64) } }
 impl From<u64> for Var { fn from(n: u64) -> Self { Var::I64(n as i64) } }
+impl From<usize> for Var { fn from(n: usize) -> Self { Var::I64(n as i64) } }
 impl From<f64> for Var { fn from(n: f64) -> Self { Var::F64(n) } }
 impl From<f32> for Var { fn from(n: f32) -> Self { Var::F64(n as f64) } }
 impl From<&str> for Var { fn from(s: &str) -> Self { Var::Str(s.to_string()) } }
@@ -434,12 +496,15 @@ impl From<Quat> for Var { fn from(v: Quat) -> Self { Var::Quat(v) } }
 
 impl From<List> for Var { fn from(l: List) -> Self { Var::List(l) } }
 impl From<Object> for Var { fn from(o: Object) -> Self { Var::Object(o) } }
+impl From<Func> for Var { fn from(f: Func) -> Self { Var::Func(f) } }
 
 // ---- serde: one trait covers every serde format (JSON/BSON/CBOR/MsgPack/…) ----
 //
 // `Var` is the universal dynamic value, so it serializes to/from a serde data
 // model. The `Func` variant has no data-model representation — it serializes
-// as `null` and deserializes back to `Null` (you can't round-trip a closure).
+// as `null` (you can't round-trip a closure). With ids, a registry (id → Func
+// table) could emit `{"__func__": id}` and restore the handle on load; until
+// that registry exists, functions die at the serialization boundary.
 
 impl serde::Serialize for Var {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -561,8 +626,9 @@ impl From<Var> for bool {
 }
 
 /// Recursively write `path` ("a.b.c") on an object, creating intermediate
-/// objects. Because payloads are `Rc<RefCell>`, this mutates the shared data
-/// in place, visible through every handle — matching gold's `varRef`.
+/// objects. Because payloads are `Arc<Mutex>`, this mutates the shared data
+/// in place, visible through every handle (on any thread) — matching gold's
+/// `varRef`.
 pub(crate) fn set_path_impl(target: &Var, path: &str, value: Var) {
     let (first, rest) = match path.split_once('.') {
         Some((f, r)) => (f, Some(r)),

@@ -1,7 +1,7 @@
 //! Serde round-trip tests: Var serializes to / from any serde format.
 //! JSON is the representative one (via serde_json).
 
-use mercury::{a, o, Null, Var};
+use mercury::{a, func, o, Null, Var};
 
 #[test]
 fn roundtrip_scalar() {
@@ -39,7 +39,7 @@ fn roundtrip_object_with_prototype() {
 #[test]
 fn function_serializes_as_null() {
     // Functions have no data-model form; they serialize to null.
-    let f = Var::Func(std::rc::Rc::new(|_| Var::from(1i64)));
+    let f = Var::from(func!(|| Var::from(1i64)));
     let json = serde_json::to_string(&f).unwrap();
     assert_eq!(json, "null");
 }

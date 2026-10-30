@@ -2,7 +2,7 @@
 //! does Rust change the shape?
 
 use mercury::sugar::{each, filter, find, join, map};
-use mercury::{a, o, Null, tpl, Var};
+use mercury::{a, func, o, Null, tpl, Var};
 
 #[test]
 fn jo_literal_nested() {
@@ -52,7 +52,7 @@ fn typed_reads() {
     let age: i64 = v.get("age").into();
     assert_eq!(age, 31);
     let active: bool = v.get("active").into();
-    assert_eq!(active, true);
+    assert!(active);
 }
 
 #[test]
@@ -104,12 +104,12 @@ fn tpl_template() {
 
 #[test]
 fn function_value() {
-    let f = Var::Func(std::rc::Rc::new(|args: &[Var]| {
+    let f: Var = func!(|args: &[Var]| {
         // sum
         let mut total = 0i64;
         for a in args { total += a.as_i64().unwrap_or(0); }
         Var::from(total)
-    }));
+    }).into();
     let out = f.call(&[Var::from(1i64), Var::from(2i64), Var::from(3i64)]);
     assert_eq!(out.as_i64(), Some(6));
 }

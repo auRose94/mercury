@@ -27,14 +27,40 @@
 //! let name: String = user.get("name").into();
 //! assert_eq!(name, "bob");
 //! ```
+//!
+//! Payloads are `Arc<Mutex>`-shared, so the whole value graph is `Send +
+//! Sync`: the same `Var` crosses threads, async tasks, and web handlers.
 
 pub mod list;
 pub mod object;
 pub mod proxy;
 pub mod sugar;
 pub mod var;
+#[cfg(feature = "web")]
+pub mod web;
 
 pub use list::List;
 pub use object::Object;
 pub use proxy::VarRef;
-pub use var::{Null, Quat, Ty, Var, Vec3, Vec4};
+pub use var::{Func, Null, Quat, Ty, Var, Vec3, Vec4};
+
+use std::sync::{Mutex, MutexGuard};
+
+/// Lock a shared payload, ignoring mutex poisoning: a panic while one thread
+/// held the lock must not brick the data for every later access (RefCell
+/// never poisoned, and the JS-like spirit is "keep going").
+pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+// Compile-time proof that the whole value graph crosses threads — the web
+// layer's multithreaded tokio runtime (and the game module's future job
+// system) lean on it.
+const _: () = {
+    const fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<Var>();
+    assert_send_sync::<List>();
+    assert_send_sync::<Object>();
+    assert_send_sync::<Func>();
+    assert_send_sync::<VarRef>();
+};

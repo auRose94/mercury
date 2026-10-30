@@ -1,15 +1,14 @@
-//! `Object` — an ordered map of named `Var`, shared via `Rc<RefCell<…>>`, with
+//! `Object` — an ordered map of named `Var`, shared via `Arc<Mutex<…>>`, with
 //! prototype inheritance (gold's `setParent`/`inherits`).
 //!
 //! Insertion order is preserved (gold's `object` is ordered), so we use
 //! `indexmap::IndexMap` — the wheel for that, no hand-rolled ordered map. The
-//! payload is `Rc<RefCell<IndexMap>>` so the `VarRef` proxy can mutate the
-//! shared object in place. The prototype is `Rc<Object>` (an `Object` is
-//! already internally shared).
+//! payload is `Arc<Mutex<IndexMap>>` so the `VarRef` proxy can mutate the
+//! shared object in place — and so the whole value graph is `Send + Sync`.
+//! The prototype is `Arc<Object>` (an `Object` is already internally shared).
 
 use std::fmt;
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use indexmap::IndexMap;
 
@@ -21,25 +20,27 @@ pub struct Object {
     /// through one another.
     entries: OwnEntries,
     /// The prototype chain head. Lookups that miss own data walk this.
-    parent: Option<Rc<Object>>,
+    parent: Option<Arc<Object>>,
 }
 
 /// Shared, interior-mutable ordered map of own keys.
-type OwnEntries = Rc<RefCell<IndexMap<String, Var>>>;
+type OwnEntries = Arc<Mutex<IndexMap<String, Var>>>;
 
 impl std::fmt::Debug for Object {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_map().entries(self.entries.borrow().iter()).finish()
+        f.debug_map().entries(self.entries()).finish()
     }
 }
 
 impl PartialEq for Object {
     fn eq(&self, other: &Self) -> bool {
-        let a = self.entries.borrow();
-        let b = other.entries.borrow();
+        // Snapshot each side (locks released) so comparing an object against
+        // its own clone can't self-deadlock.
+        let a = self.entries();
+        let b = other.entries();
         a.len() == b.len()
             && a.iter()
-                .all(|(k, v)| b.get(k).is_some_and(|bv| bv == v))
+                .all(|(k, v)| b.iter().any(|(bk, bv)| bk == k && bv == v))
     }
 }
 
@@ -96,18 +97,19 @@ impl Object {
     pub fn new() -> Self { Object::default() }
 
     /// True if `key` is declared in this object's own data (not the parent).
-    pub fn owns(&self, key: &str) -> bool { self.entries.borrow().contains_key(key) }
+    pub fn owns(&self, key: &str) -> bool { crate::lock(&self.entries).contains_key(key) }
 
     /// Own value for `key`, ignoring the prototype chain.
     pub fn get_own(&self, key: &str) -> Option<Var> {
-        self.entries.borrow().get(key).cloned()
+        crate::lock(&self.entries).get(key).cloned()
     }
 
     /// Value for `key`, walking the prototype chain on miss (gold's `getVar`).
     /// Returns `Null` on a miss — the JS `obj[k]` → `undefined` semantics.
+    /// Locks one object at a time, so a chain walk never holds two locks.
     pub fn get(&self, key: &str) -> Var {
-        if let Some(v) = self.entries.borrow().get(key) {
-            return v.clone();
+        if let Some(v) = self.get_own(key) {
+            return v;
         }
         self.parent.as_ref().map(|p| p.get(key)).unwrap_or(Var::Null)
     }
@@ -134,14 +136,14 @@ impl Object {
 
     /// Set an own key. Mutates the shared map in place.
     pub fn set(&self, key: impl Into<String>, value: Var) {
-        self.entries.borrow_mut().insert(key.into(), value);
+        crate::lock(&self.entries).insert(key.into(), value);
     }
 
     /// Insert `key` as the *first* entry (used by the `o!` macro, which builds
     /// the tail recursively and prepends the head to preserve source order).
     pub fn prepend(&self, key: impl Into<String>, value: Var) {
         let key = key.into();
-        let mut entries = self.entries.borrow_mut();
+        let mut entries = crate::lock(&self.entries);
         let rest: Vec<(String, Var)> = entries
             .iter()
             .filter(|(k, _)| k.as_str() != key)
@@ -157,26 +159,28 @@ impl Object {
     /// Copy all own entries from another object (used by the `o!` macro to
     /// build forward order). Later keys overwrite earlier ones.
     pub fn extend(&self, other: &Object) {
-        let mut entries = self.entries.borrow_mut();
-        for (k, v) in other.entries.borrow().iter() {
-            entries.insert(k.clone(), v.clone());
+        // Snapshot `other` first: if it shares this object's payload, locking
+        // both sides at once would deadlock.
+        let snapshot = other.entries();
+        let mut entries = crate::lock(&self.entries);
+        for (k, v) in snapshot {
+            entries.insert(k, v);
         }
     }
 
     /// Remove an own key.
     pub fn remove(&self, key: &str) -> Option<Var> {
-        self.entries.borrow_mut().shift_remove(key)
+        crate::lock(&self.entries).shift_remove(key)
     }
 
-    pub fn len(&self) -> usize { self.entries.borrow().len() }
-    pub fn is_empty(&self) -> bool { self.entries.borrow().is_empty() }
+    pub fn len(&self) -> usize { crate::lock(&self.entries).len() }
+    pub fn is_empty(&self) -> bool { crate::lock(&self.entries).is_empty() }
 
-    /// Snapshot of own entries (cloned). Borrowing past a `RefCell` borrow isn't
+    /// Snapshot of own entries (cloned). Holding a lock across user code isn't
     /// expressible, so this returns owned copies — fine for display/debug/
     /// iteration; hot paths should use `get`/`get_own`.
     pub fn entries(&self) -> Vec<(String, Var)> {
-        self.entries
-            .borrow()
+        crate::lock(&self.entries)
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect()
@@ -184,17 +188,17 @@ impl Object {
 
     /// Attach a prototype (gold's `setParent`).
     pub fn set_parent(&mut self, parent: Object) {
-        self.parent = Some(Rc::new(parent));
+        self.parent = Some(Arc::new(parent));
     }
 
     /// Does `self` inherit (directly or transitively) from `other`? Identity is
     /// checked via the shared `entries` allocation, which uniquely tags an
     /// object instance.
     pub fn inherits(&self, other: &Object) -> bool {
-        let other_ptr = Rc::as_ptr(&other.entries);
+        let other_ptr = Arc::as_ptr(&other.entries);
         let mut cur = &self.parent;
         while let Some(p) = cur {
-            if Rc::as_ptr(&p.entries) == other_ptr { return true; }
+            if Arc::as_ptr(&p.entries) == other_ptr { return true; }
             cur = &p.parent;
         }
         false

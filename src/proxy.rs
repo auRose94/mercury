@@ -1,6 +1,6 @@
 //! `VarRef` — the read/write proxy, a faithful port of gold's `varRef`.
 //!
-//! Because `Var` payloads are `Rc<RefCell<…>>`, a `VarRef` can mutate the
+//! Because `Var` payloads are `Arc<Mutex<…>>`, a `VarRef` can mutate the
 //! original object/list in place through one handle — the behavior gold gets
 //! from its mutex-guarded shared data. Reads chain (`v.at("a").at("b")`);
 //! writes go through `.put()` / `.set()`.
