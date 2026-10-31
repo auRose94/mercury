@@ -31,8 +31,8 @@ fn offscreen_frame_has_expected_pixels() {
     };
     renderer.set_clear_color([0.1, 0.2, 0.3, 1.0]);
     renderer.set_scene(&[
-        hydrargyros::game::Quad { pos: [-0.3, 0.0], size: [0.2, 0.2], color: [0.0, 0.6, 0.0, 1.0] },
-        hydrargyros::game::Quad { pos: [0.3, 0.0], size: [0.2, 0.2], color: [1.0, 0.4, 0.1, 1.0] },
+        hydrargyros::game::Quad::rect([-0.3, 0.0], [0.2, 0.2], [0.0, 0.6, 0.0, 1.0]),
+        hydrargyros::game::Quad::rect([0.3, 0.0], [0.2, 0.2], [1.0, 0.4, 0.1, 1.0]),
     ]);
     renderer.render_frame();
     let frame = renderer.screenshot();

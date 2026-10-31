@@ -60,4 +60,8 @@ pub trait Component: Send {
     /// Mutable typed lookup — the engine's physics pass configures
     /// components that way (materializing bodies).
     fn as_any_mut(&mut self) -> &mut dyn Any;
+
+    /// If this component contributes geometry to the drawn scene (gold's
+    /// renderables), the engine's draw pass picks it up here.
+    fn as_renderable(&self) -> Option<&dyn super::renderable::Renderable> { None }
 }

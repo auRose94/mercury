@@ -33,6 +33,7 @@
 //! ])));
 //! ```
 
+pub mod camera;
 pub mod component;
 pub mod engine;
 pub mod entity;
@@ -41,6 +42,7 @@ pub mod physics_rapier;
 pub mod physics;
 pub mod physics_body;
 pub mod render;
+pub mod renderable;
 #[cfg(feature = "wgpu")]
 pub mod render_wgpu;
 #[cfg(feature = "stream")]
@@ -54,12 +56,14 @@ pub mod winit_window;
 pub mod transform;
 pub mod window;
 
+pub use camera::Camera;
 pub use component::{Component, Priority};
 pub use engine::Engine;
 pub use entity::Entity;
 pub use physics::PhysicsWorld;
 pub use physics_body::PhysicsBody;
-pub use render::{Quad, RenderBackend};
+pub use render::{Quad, QuadShape, RenderBackend};
+pub use renderable::{MeshRenderer, MeshShape, Renderable};
 #[cfg(feature = "wgpu")]
 pub use render::FrameSink;
 #[cfg(feature = "wgpu")]

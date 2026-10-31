@@ -164,9 +164,12 @@ Ported from gold's `game` module, headless first (gold ships a
 - **Render** (behind the `wgpu` feature) — a `RenderBackend` trait and an
   **offscreen wgpu renderer**: no window, no surface — frames render to a
   texture, get read back, and can be saved as PNGs (gold's screenshot debug
-  aid), so tests assert actual pixels. A uniform-driven quad (position,
-  size, color) is the v0 "mesh" — enough to watch an entity move; meshes,
-  renderables and cameras are the next rungs.
+  aid), so tests assert actual pixels. The scene is camera-driven: a
+  `Camera` (position + half-extents, world → clip) and a `MeshRenderer`
+  component (rect/circle silhouettes, SDF-clipped in the shader) — entities
+  render themselves through the draw pass at their composed world
+  transforms. Meshes with real geometry, textures/sprites and lights are
+  the next rungs.
 
 Next: meshes/renderables/cameras on the renderer, then the interpreter seam
 so components can be scripted.

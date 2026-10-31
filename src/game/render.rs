@@ -4,12 +4,45 @@
 //! surface needed — so frames can be pixel-tested and screenshotted
 //! headlessly, exactly like gold's `{"screenshot", path}` debug aid.
 
-/// One solid quad in clip space: center `pos`, half-extents `size`, `color`.
+/// The silhouette of a quad: a rectangle, or a circle inscribed in it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuadShape {
+    Rect,
+    Circle,
+}
+
+impl QuadShape {
+    /// The shader's encoding (1 = circle).
+    pub fn as_u32(self) -> u32 {
+        match self {
+            QuadShape::Rect => 0,
+            QuadShape::Circle => 1,
+        }
+    }
+}
+
+/// One solid quad in clip space: center `pos`, half-extents `size`, `color`,
+/// `shape` silhouette. (World-space quads go through
+/// [`RenderBackend::begin_scene`] + [`RenderBackend::push_quad`], which
+/// apply the camera.)
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Quad {
     pub pos: [f32; 2],
     pub size: [f32; 2],
     pub color: [f32; 4],
+    pub shape: QuadShape,
+}
+
+impl Quad {
+    /// A rectangular quad.
+    pub fn rect(pos: [f32; 2], size: [f32; 2], color: [f32; 4]) -> Self {
+        Quad { pos, size, color, shape: QuadShape::Rect }
+    }
+
+    /// A circular quad (the circle is inscribed in the quad's bounds).
+    pub fn circle(pos: [f32; 2], radius: [f32; 2], color: [f32; 4]) -> Self {
+        Quad { pos, size: radius, color, shape: QuadShape::Circle }
+    }
 }
 
 /// One rendered frame, RGBA8, top to bottom.
@@ -68,6 +101,15 @@ pub trait RenderBackend: Send {
 
     /// Per-frame setup, before the update pass.
     fn pre_frame(&mut self) {}
+
+    /// Begin a camera-driven scene: clears the quad list; subsequent
+    /// [`push_quad`](Self::push_quad) calls take WORLD-space positions and
+    /// are mapped through this camera.
+    fn begin_scene(&mut self, _camera: &crate::game::camera::Camera) {}
+
+    /// Append a quad to the current scene. Positions are world-space after
+    /// [`begin_scene`](Self::begin_scene), clip-space otherwise.
+    fn push_quad(&mut self, _quad: Quad) {}
 
     /// Draw the frame. Called after the engine's draw pass.
     fn render_frame(&mut self) {}

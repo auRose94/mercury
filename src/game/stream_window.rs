@@ -177,6 +177,13 @@ impl WindowSystem for StreamingWindow {
     fn handle_event(&mut self, _event: &Var) {}
 }
 
+/// The shared-handle form drives the pump from another thread.
+impl WindowSystem for std::sync::Arc<StreamingWindow> {
+    fn poll(&mut self) -> Vec<Var> { self.drain() }
+
+    fn handle_event(&mut self, _event: &Var) {}
+}
+
 /// The WebSocket upgrade route: state carries the sink and the event pipe.
 async fn ws_upgrade(
     ws: WebSocketUpgrade,

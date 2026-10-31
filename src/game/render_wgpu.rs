@@ -11,6 +11,8 @@ struct Quad {
     pos: vec2f,
     size: vec2f,
     color: vec4f,
+    shape: u32,
+    _pad: u32,
 };
 
 struct Scene {
@@ -18,7 +20,7 @@ struct Scene {
     _pad0: u32,
     _pad1: u32,
     _pad2: u32,
-    quads: array<Quad, 64>,
+    quads: array<Quad, 256>,
 };
 
 @group(0) @binding(0) var<uniform> scene: Scene;
@@ -26,6 +28,8 @@ struct Scene {
 struct VsOut {
     @builtin(position) pos: vec4f,
     @location(0) color: vec3f,
+    @location(1) @interpolate(flat) shape: u32,
+    @location(2) local: vec2f,
 };
 
 @vertex
@@ -39,19 +43,27 @@ fn vs(@builtin(vertex_index) i: u32) -> VsOut {
     var out: VsOut;
     out.pos = vec4f(scene.quads[quad].pos + offsets[corner] * scene.quads[quad].size, 0.0, 1.0);
     out.color = scene.quads[quad].color.rgb;
+    out.shape = scene.quads[quad].shape;
+    out.local = offsets[corner];
     return out;
 }
 
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4f {
+    // circles: clip to the inscribed disc
+    if (in.shape == 1u && length(in.local) > 1.0) {
+        discard;
+    }
     return vec4f(in.color, 1.0);
 }
 "#;
 
-/// The per-frame uniform: up to 64 solid quads. CPU layout must match the
-/// WGSL: `count` + 3 pad words, then 32-byte quads.
-const MAX_QUADS: usize = 64;
-const SCENE_BYTES: usize = 16 + MAX_QUADS * 32;
+/// The per-frame uniform: up to 256 quads. CPU layout must match the WGSL:
+/// `count` + 3 pad words, then 48-byte quads (color is 16-aligned, so the
+/// quad's stride rounds 40 up to 48).
+const MAX_QUADS: usize = 256;
+const QUAD_STRIDE: usize = 48;
+const SCENE_BYTES: usize = 16 + MAX_QUADS * QUAD_STRIDE;
 
 fn scene_bytes(quads: &[crate::game::render::Quad]) -> Vec<u8> {
     let mut out = Vec::with_capacity(SCENE_BYTES);
@@ -63,6 +75,9 @@ fn scene_bytes(quads: &[crate::game::render::Quad]) -> Vec<u8> {
         for f in quad.pos.iter().chain(quad.size.iter()).chain(quad.color.iter()) {
             out.extend_from_slice(&f.to_le_bytes());
         }
+        out.extend_from_slice(&quad.shape.as_u32().to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());
+        out.resize(out.len() + 8, 0); // pad the stride to 48
     }
     out.resize(SCENE_BYTES, 0);
     out
@@ -86,6 +101,7 @@ pub struct WgpuRenderer {
     readback: wgpu::Buffer,
     size: (u32, u32),
     clear_color: [f64; 4],
+    camera: Option<crate::game::camera::Camera>,
     frame_sink: Option<crate::game::render::FrameSink>,
     last_frame: Vec<u8>,
     /// When a window is attached, frames present to its surface instead of
@@ -218,6 +234,7 @@ impl WgpuRenderer {
             readback,
             size: (64, 64),
             clear_color: [0.1, 0.2, 0.3, 1.0],
+            camera: None,
             scene: Vec::new(),
             frame_sink: None,
             last_frame: Vec::new(),
@@ -322,6 +339,7 @@ impl WgpuRenderer {
             readback,
             size: (width, height),
             clear_color: [0.1, 0.2, 0.3, 1.0],
+            camera: None,
             scene: Vec::new(),
             frame_sink: None,
             last_frame: Vec::new(),
@@ -345,7 +363,7 @@ impl WgpuRenderer {
 
     /// Convenience: a single-quad scene.
     pub fn set_quad(&mut self, pos: [f32; 2], size: [f32; 2], color: [f32; 4]) {
-        self.scene = vec![crate::game::render::Quad { pos, size, color }];
+        self.scene = vec![crate::game::render::Quad::rect(pos, size, color)];
     }
 
     fn offscreen_target(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
@@ -459,6 +477,24 @@ impl super::render::RenderBackend for WgpuRenderer {
     fn name(&self) -> &str { "wgpu-offscreen" }
 
     fn pre_frame(&mut self) {}
+
+    fn begin_scene(&mut self, camera: &crate::game::camera::Camera) {
+        self.camera = Some(*camera);
+        self.scene.clear();
+    }
+
+    fn push_quad(&mut self, mut quad: crate::game::render::Quad) {
+        if self.scene.len() >= MAX_QUADS {
+            return;
+        }
+        if let Some(camera) = &self.camera {
+            let clip = camera.world_to_clip(crate::var::Vec3::new(
+                quad.pos[0], quad.pos[1], 0.0,
+            ));
+            quad.pos = clip;
+        }
+        self.scene.push(quad);
+    }
 
     fn render_frame(&mut self) {
         // window mode: present straight to the surface (no readback)

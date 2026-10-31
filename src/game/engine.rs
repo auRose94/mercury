@@ -8,11 +8,13 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use super::camera::Camera;
 use super::component::Priority;
 use super::entity::Entity;
 use super::physics::PhysicsWorld;
 use super::physics_body::PhysicsBody;
 use super::render::RenderBackend;
+use super::transform::Transform;
 use super::window::{create_window_backend, WindowSystem};
 use crate::var::Var;
 
@@ -31,6 +33,7 @@ pub struct Engine {
     settings_root: PathBuf,
     physics: Option<PhysicsWorld>,
     renderer: Option<Box<dyn RenderBackend>>,
+    camera: Camera,
     /// Fixed delta time for the pump (seconds). `None` = wall clock (gold's
     /// behavior); headless sims set it for deterministic frames.
     fixed_dt: Option<f64>,
@@ -49,9 +52,20 @@ impl Engine {
             settings_root: PathBuf::from("."),
             physics: None,
             renderer: None,
+            camera: Camera::default(),
             fixed_dt: None,
         }
     }
+
+    /// Attach the camera the scene renders through (a default 16:9 view is
+    /// set up for you).
+    pub fn set_camera(&mut self, camera: Camera) -> &mut Self {
+        self.camera = camera;
+        self
+    }
+
+    /// The camera the scene renders through.
+    pub fn camera(&self) -> &Camera { &self.camera }
 
     /// Drive the pump with a fixed delta time instead of the wall clock —
     /// the headless way to get deterministic frames (240 frames at 1/60 =
@@ -206,11 +220,42 @@ impl Engine {
         }
     }
 
-    /// One frame's draw pass: draw-priority components, after all updates.
+    /// One frame's draw pass: the camera scene opens, every renderable
+    /// component contributes its geometry at its entity's WORLD transform
+    /// (composed down the parent chain), then non-mesh draw-tier components
+    /// get their `draw()`. Public so tests and headless code can drive
+    /// frames without a window.
     pub fn draw(&mut self) {
-        for (priority, path) in self.update_order() {
-            if priority == Priority::Draw.value() {
-                self.slot_at_mut(&path).component.draw();
+        let order = self.update_order();
+        let Self { renderer, entities, camera, .. } = self;
+
+        if let Some(renderer) = renderer.as_mut() {
+            renderer.begin_scene(camera);
+        }
+
+        for (priority, path) in order {
+            let is_draw_tier = priority == Priority::Draw.value();
+            let owner_path = &path[..path.len() - 1];
+
+            // world transform of the owning entity (composed down the chain)
+            let world = world_transform_at(entities, owner_path);
+            let last = *path.last().unwrap();
+            let mut quad = None;
+            {
+                let entity = walk_mut(entities, *owner_path.first().unwrap(), &owner_path[1..]);
+                let Some(entity) = entity else { continue };
+                let slot = entity.slot_at_mut(&[last]);
+                if let Some(renderable) = slot.component.as_renderable() {
+                    quad = Some(renderable.quad(&world));
+                } else if is_draw_tier {
+                    slot.component.draw();
+                }
+            }
+
+            if let Some(quad) = quad {
+                if let Some(renderer) = renderer.as_mut() {
+                    renderer.push_quad(quad);
+                }
             }
         }
     }
@@ -316,4 +361,22 @@ fn walk_mut<'a>(
         entity = entity.child_mut(*idx)?;
     }
     Some(entity)
+}
+
+/// The world transform of an entity at an owner path (composed down the
+/// parent chain — gold's transform hierarchy).
+fn world_transform_at(entities: &[Entity], owner_path: &[usize]) -> Transform {
+    let Some((first, rest)) = owner_path.split_first() else {
+        return Transform::default();
+    };
+    let Some(mut entity) = entities.get(*first) else {
+        return Transform::default();
+    };
+    let mut world = *entity.transform();
+    for idx in rest {
+        let Some(child) = entity.children().get(*idx) else { break };
+        world = child.transform().compose(&world);
+        entity = child;
+    }
+    world
 }

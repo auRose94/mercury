@@ -12,48 +12,34 @@
 //! page's quit button to end the pump.
 
 use hydrargyros::game::physics::Shape as PhysShape;
-use hydrargyros::game::render::{FrameSink, Quad};
+use hydrargyros::game::render::FrameSink;
 use hydrargyros::game::RenderBackend;
+use hydrargyros::game::renderable::MeshRenderer;
 use hydrargyros::game::{Engine, Entity, PhysicsBody, PhysicsWorld, WgpuRenderer};
 use hydrargyros::var::Vec3;
 use hydrargyros::Var;
-
-/// World → clip mapping shared by the whole scene: x ∈ [-8.89, 8.89],
-/// y ∈ [-1, 9] — a 16:9 world on a 16:9 canvas, so pixels are square —
-/// with +y UP on the screen (world and screen agree, so gravity reads
-/// as "down").
-fn world_quad(pos: Vec3, half_extents: Vec3, color: [f32; 4]) -> Quad {
-    const X_HALF_RANGE: f32 = 8.89; // 5 * 16/9: square pixels at 16:9
-    const Y_BOTTOM: f32 = -1.0;
-    const Y_RANGE: f32 = 10.0;
-    Quad {
-        pos: [pos.x / X_HALF_RANGE, 2.0 * (pos.y - Y_BOTTOM) / Y_RANGE - 1.0],
-        size: [half_extents.x / X_HALF_RANGE, 2.0 * half_extents.y / Y_RANGE],
-        color,
-    }
-}
-
-const FLOOR_COLOR: [f32; 4] = [0.30, 0.34, 0.40, 1.0];
-const BALL_COLOR: [f32; 4] = [1.0, 0.4, 0.1, 1.0];
-const FLOOR_HALF: Vec3 = Vec3 { x: 6.0, y: 0.5, z: 6.0 };
-const BALL_HALF: Vec3 = Vec3 { x: 0.5, y: 0.5, z: 0.5 };
-
 
 fn main() {
     let mut engine = Engine::new("acme", "stream-demo");
     engine.frame_time(0.0);
     engine.fixed_dt(1.0 / 60.0); // 60 fps of simulated time, however fast we render
     engine.set_physics(PhysicsWorld::create("rapier", &Var::Null).unwrap());
+    // the default camera is a 16:9 view over y ∈ [-1, 9] — square pixels
 
     let mut floor = Entity::new("floor");
     floor.add_component(Box::new(
-        PhysicsBody::new("floor", PhysShape::Box(FLOOR_HALF)).static_body(),
+        PhysicsBody::new("floor", PhysShape::Box(Vec3::new(6.0, 0.5, 6.0))).static_body(),
     ));
+    floor.add_component(Box::new(MeshRenderer::rect(
+        Vec3::new(6.0, 0.5, 6.0),
+        [0.30, 0.34, 0.40, 1.0],
+    )));
     engine.add_entity(floor);
 
     let mut ball = Entity::new("ball");
     ball.transform_mut().position = Vec3::new(0.0, 8.0, 0.0);
-    ball.add_component(Box::new(PhysicsBody::new("ball", PhysShape::Sphere(BALL_HALF.x))));
+    ball.add_component(Box::new(PhysicsBody::new("ball", PhysShape::Sphere(0.5))));
+    ball.add_component(Box::new(MeshRenderer::circle(0.5, [1.0, 0.4, 0.1, 1.0])));
     engine.add_entity(ball);
 
     // the offscreen renderer publishes every frame into the sink
@@ -79,7 +65,7 @@ fn main() {
     #[cfg(feature = "tray")]
     {
         let window = window.clone();
-        match hydrargyros::game::spawn_tray_quit("mercury (streaming)", move |quit| {
+        match hydrargyros::game::spawn_tray_quit("hydrargyros (streaming)", move |quit| {
             window.inject(quit);
         }) {
             Ok(()) => println!("tray icon up (Quit closes the game)"),
@@ -121,18 +107,8 @@ fn main() {
         }
 
         engine.update(1.0 / 60.0);
+        // the draw pass emits the entities' MeshRenderers through the camera
         engine.draw();
-
-        // the scene: floor + ball, +y up on screen (matches physics)
-        let ball_pos = engine
-            .physics_mut()
-            .and_then(|w| w.body_pose("ball"))
-            .map(|(pos, _)| pos)
-            .unwrap_or(Vec3::new(0.0, 8.0, 0.0));
-        renderer.set_scene(&[
-            world_quad(Vec3::new(0.0, 0.0, 0.0), FLOOR_HALF, FLOOR_COLOR),
-            world_quad(ball_pos, BALL_HALF, BALL_COLOR),
-        ]);
         renderer.render_frame();
         std::thread::sleep(std::time::Duration::from_millis(16));
     }
