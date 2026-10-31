@@ -30,6 +30,10 @@ fn offscreen_frame_has_expected_pixels() {
         return;
     };
     renderer.set_clear_color([0.1, 0.2, 0.3, 1.0]);
+    renderer.set_scene(&[
+        mercury::game::Quad { pos: [-0.3, 0.0], size: [0.2, 0.2], color: [0.0, 0.6, 0.0, 1.0] },
+        mercury::game::Quad { pos: [0.3, 0.0], size: [0.2, 0.2], color: [1.0, 0.4, 0.1, 1.0] },
+    ]);
     renderer.render_frame();
     let frame = renderer.screenshot();
     assert_eq!(frame.len(), 64 * 64 * 4);
@@ -41,11 +45,16 @@ fn offscreen_frame_has_expected_pixels() {
         assert!((*got as i32 - want as i32).abs() <= 3, "corner {corner:?} vs {expected:?}");
     }
 
-    // the quad's center: solid quad color (1.0, 0.4, 0.1)
-    let inside = pixel(frame, 64, 32, 32);
-    let expected = [srgb8(1.0), srgb8(0.4), srgb8(0.1), 255];
-    for (got, want) in inside.iter().zip(expected) {
-        assert!((*got as i32 - want as i32).abs() <= 3, "inside {inside:?} vs {expected:?}");
+    // both quads drawn, left green and right orange (multi-quad scene)
+    let left = pixel(frame, 64, 22, 32);
+    let right = pixel(frame, 64, 42, 32);
+    let want_left = [srgb8(0.0), srgb8(0.6), srgb8(0.0), 255];
+    let want_right = [srgb8(1.0), srgb8(0.4), srgb8(0.1), 255];
+    for (got, want) in left.iter().zip(want_left) {
+        assert!((*got as i32 - want as i32).abs() <= 3, "left {left:?} vs {want_left:?}");
+    }
+    for (got, want) in right.iter().zip(want_right) {
+        assert!((*got as i32 - want as i32).abs() <= 3, "right {right:?} vs {want_right:?}");
     }
 }
 

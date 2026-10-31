@@ -10,6 +10,7 @@
 use std::thread;
 
 use mercury::game::physics::Shape;
+use mercury::game::render::Quad;
 use mercury::game::winit_window::WinitWindow;
 use mercury::game::window::WindowSystem;
 use mercury::game::RenderBackend;
@@ -64,6 +65,17 @@ fn main() {
         engine.fixed_dt(1.0 / 60.0);
         engine.set_physics(PhysicsWorld::create("rapier", &Var::Null).unwrap());
 
+        // world → clip: x ∈ [-8, 8], y ∈ [-1, 9], +y up on screen
+        fn world_quad(pos: Vec3, half_extents: Vec3, color: [f32; 4]) -> Quad {
+            Quad {
+                pos: [pos.x / 8.0, 2.0 * (pos.y + 1.0) / 10.0 - 1.0],
+                size: [half_extents.x / 8.0, 2.0 * half_extents.y / 10.0],
+                color,
+            }
+        }
+        const FLOOR_COLOR: [f32; 4] = [0.30, 0.34, 0.40, 1.0];
+        const BALL_COLOR: [f32; 4] = [1.0, 0.4, 0.1, 1.0];
+
         let mut floor = Entity::new("floor");
         floor.add_component(Box::new(
             PhysicsBody::new("floor", Shape::Box(Vec3::new(6.0, 0.5, 6.0))).static_body(),
@@ -91,16 +103,16 @@ fn main() {
             engine.update(1.0 / 60.0);
             engine.draw();
 
-            // map the ball's world position into the clip-space quad
-            if let Some(world) = engine.physics_mut() {
-                if let Some((pos, _)) = world.body_pose("ball") {
-                    renderer.set_quad(
-                        [pos.x / 8.0, 1.0 - (pos.y + 1.0) / 9.0],
-                        [0.08, 0.12],
-                        [1.0, 0.4, 0.1, 1.0],
-                    );
-                }
-            }
+            // the scene: floor + ball, +y up on screen (matches physics)
+            let ball_pos = engine
+                .physics_mut()
+                .and_then(|w| w.body_pose("ball"))
+                .map(|(pos, _)| pos)
+                .unwrap_or(Vec3::new(0.0, 8.0, 0.0));
+            renderer.set_scene(&[
+                world_quad(Vec3::new(0.0, 0.0, 0.0), Vec3::new(6.0, 0.5, 6.0), FLOOR_COLOR),
+                world_quad(ball_pos, Vec3::splat(0.5), BALL_COLOR),
+            ]);
             renderer.render_frame();
             thread::sleep(std::time::Duration::from_millis(16));
         }

@@ -24,14 +24,24 @@ const PAGE: &str = r#"<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>Mercury — streaming window</title>
 <style>
 body { margin: 0; background: #14161a; color: #e8e6e3; font-family: system-ui, sans-serif;
-       display: flex; flex-direction: column; align-items: center; gap: .5rem; padding: 1rem; }
-canvas { image-rendering: pixelated; border: 1px solid #2a2e36; border-radius: 8px; max-width: 96vw; }
+       display: flex; flex-direction: column; align-items: center; gap: .75rem;
+       padding: 1rem; height: 100vh; box-sizing: border-box; }
+canvas { image-rendering: pixelated; border: 1px solid #2a2e36; border-radius: 8px;
+         max-width: 96vw; max-height: 82vh; background: #000; }
+body.fit canvas { width: 96vw; height: auto; max-height: 82vh; }
+.row { display: flex; align-items: center; gap: 1.25rem; }
 button { background: #4f6df5; color: #fff; border: 0; border-radius: 6px; padding: .4rem 1rem; }
-#status { color: #9aa3b2; font-size: .85rem; }
+button.secondary { background: #2a2e36; color: #e8e6e3; }
+#status { color: #9aa3b2; font-size: .85rem; margin: 0 1.5rem; min-width: 6rem; }
 </style></head>
 <body>
 <canvas id="screen" width="320" height="180"></canvas>
-<div><button id="quit">quit</button><span id="status">connecting…</span></div>
+<div class="row">
+  <button id="quit">quit</button>
+  <button id="fullscreen" class="secondary">fullscreen</button>
+  <button id="fit" class="secondary">fit</button>
+  <span id="status">connecting…</span>
+</div>
 <script>
 const canvas = document.getElementById("screen");
 const ctx = canvas.getContext("2d");
@@ -64,6 +74,16 @@ canvas.addEventListener("mouseup",   (e) => { const p = canvasPos(e); send({ typ
 canvas.addEventListener("mousemove", (e) => { const p = canvasPos(e); send({ type: "mouse", action: "move", x: p.x, y: p.y }); });
 canvas.addEventListener("wheel",     (e) => { const p = canvasPos(e); send({ type: "wheel", delta: e.deltaY, x: p.x, y: p.y }); e.preventDefault(); }, { passive: false });
 document.getElementById("quit").addEventListener("click", () => send({ type: "quit" }));
+document.getElementById("fullscreen").addEventListener("click", () => {
+  if (document.fullscreenElement) { document.exitFullscreen(); }
+  else { document.documentElement.requestFullscreen(); }
+});
+let fitMode = false;
+document.getElementById("fit").addEventListener("click", () => {
+  fitMode = !fitMode;
+  document.body.classList.toggle("fit", fitMode);
+  document.getElementById("fit").textContent = fitMode ? "fit: on" : "fit";
+});
 </script>
 </body></html>"#;
 
@@ -73,7 +93,8 @@ document.getElementById("quit").addEventListener("click", () => send({ type: "qu
 /// wheel, and a page `quit` button, all as `Var` objects.
 pub struct StreamingWindow {
     url: String,
-    events: mpsc::Receiver<Var>,
+    events: std::sync::Mutex<mpsc::Receiver<Var>>,
+    event_tx: mpsc::Sender<Var>,
     _server: std::thread::JoinHandle<()>,
 }
 
@@ -86,6 +107,7 @@ impl StreamingWindow {
     /// The bind failed.
     pub fn new(bind: &str, sink: FrameSink, open_browser: bool) -> Result<Self, String> {
         let (event_tx, event_rx) = mpsc::channel::<Var>();
+        let server_tx = event_tx.clone();
         let std_listener = std::net::TcpListener::bind(bind)
             .map_err(|e| format!("stream bind {bind}: {e}"))?;
         let addr = std_listener
@@ -106,7 +128,7 @@ impl StreamingWindow {
                     let app = Router::new()
                         .route("/", get(|| async { axum::response::Html(PAGE) }))
                         .route("/ws", get(ws_upgrade))
-                        .with_state((sink, event_tx));
+                        .with_state((sink, server_tx));
                     let listener = tokio::net::TcpListener::from_std(std_listener)
                         .expect("stream listener");
                     axum::serve(listener, app).await.expect("stream server");
@@ -117,22 +139,38 @@ impl StreamingWindow {
         if open_browser {
             open_in_browser(&url);
         }
-        Ok(StreamingWindow { url, events: event_rx, _server: handle })
+        Ok(StreamingWindow {
+            url,
+            events: std::sync::Mutex::new(event_rx),
+            event_tx: event_tx.clone(),
+            _server: handle,
+        })
     }
 
     /// The page URL (useful when the browser wasn't auto-opened).
     pub fn url(&self) -> &str { &self.url }
-}
 
-impl WindowSystem for StreamingWindow {
-    /// Non-blocking: drains everything the browser sent since last poll.
-    fn poll(&mut self) -> Vec<Var> {
+    /// Non-blocking drain of browser events — the `&self` form, callable
+    /// through a shared handle. ([`WindowSystem::poll`] delegates here.)
+    pub fn drain(&self) -> Vec<Var> {
+        let receiver = self.events.lock().unwrap();
         let mut events = Vec::new();
-        while let Ok(event) = self.events.try_recv() {
+        while let Ok(event) = receiver.try_recv() {
             events.push(event);
         }
         events
     }
+
+    /// Inject an event as if the browser had sent it — the seam a system
+    /// tray (or a test) uses to reach the engine.
+    pub fn inject(&self, event: Var) {
+        let _ = self.event_tx.send(event);
+    }
+}
+
+impl WindowSystem for StreamingWindow {
+    /// Non-blocking: drains everything the browser sent since last poll.
+    fn poll(&mut self) -> Vec<Var> { self.drain() }
 
     fn handle_event(&mut self, _event: &Var) {}
 }

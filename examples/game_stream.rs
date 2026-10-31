@@ -11,13 +11,28 @@
 //! fall; press keys, click around — events print in the console; hit the
 //! page's quit button to end the pump.
 
-use mercury::game::physics::{Shape as PhysShape};
-use mercury::game::render::FrameSink;
-use mercury::game::window::WindowSystem;
+use mercury::game::physics::Shape as PhysShape;
+use mercury::game::render::{FrameSink, Quad};
 use mercury::game::RenderBackend;
 use mercury::game::{Engine, Entity, PhysicsBody, PhysicsWorld, WgpuRenderer};
 use mercury::var::Vec3;
 use mercury::Var;
+
+/// World → clip mapping shared by the whole scene: x ∈ [-8, 8], y ∈ [-1, 9],
+/// with +y UP on the screen (world and screen agree, so gravity reads
+/// as "down").
+fn world_quad(pos: Vec3, half_extents: Vec3, color: [f32; 4]) -> Quad {
+    Quad {
+        pos: [pos.x / 8.0, 2.0 * (pos.y + 1.0) / 10.0 - 1.0],
+        size: [half_extents.x / 8.0, 2.0 * half_extents.y / 10.0],
+        color,
+    }
+}
+
+const FLOOR_COLOR: [f32; 4] = [0.30, 0.34, 0.40, 1.0];
+const BALL_COLOR: [f32; 4] = [1.0, 0.4, 0.1, 1.0];
+const FLOOR_HALF: Vec3 = Vec3 { x: 6.0, y: 0.5, z: 6.0 };
+const BALL_HALF: Vec3 = Vec3 { x: 0.5, y: 0.5, z: 0.5 };
 
 
 fn main() {
@@ -28,13 +43,13 @@ fn main() {
 
     let mut floor = Entity::new("floor");
     floor.add_component(Box::new(
-        PhysicsBody::new("floor", PhysShape::Box(Vec3::new(6.0, 0.5, 6.0))).static_body(),
+        PhysicsBody::new("floor", PhysShape::Box(FLOOR_HALF)).static_body(),
     ));
     engine.add_entity(floor);
 
     let mut ball = Entity::new("ball");
     ball.transform_mut().position = Vec3::new(0.0, 8.0, 0.0);
-    ball.add_component(Box::new(PhysicsBody::new("ball", PhysShape::Sphere(0.5))));
+    ball.add_component(Box::new(PhysicsBody::new("ball", PhysShape::Sphere(BALL_HALF.x))));
     engine.add_entity(ball);
 
     // the offscreen renderer publishes every frame into the sink
@@ -43,13 +58,31 @@ fn main() {
         .expect("no wgpu adapter on this machine");
     renderer.attach_sink(sink.clone());
 
+    #[cfg(not(feature = "tray"))]
+    println!("(build with --features tray for a system-tray quit button)");
+
     // the streaming window: browser events come back as Var.
     // --no-open skips the auto-launch (paste the URL into any browser —
     // including an embedded one like ZCode's).
     let open_browser = !std::env::args().any(|a| a == "--no-open");
-    let mut window =
+    let window =
         mercury::game::StreamingWindow::new("127.0.0.1:8400", sink, open_browser)
             .expect("stream server");
+    let window = std::sync::Arc::new(window);
+
+
+    // tray icon: Quit reaches the engine even with no visible window
+    #[cfg(feature = "tray")]
+    {
+        let window = window.clone();
+        match mercury::game::spawn_tray_quit("mercury (streaming)", move |quit| {
+            window.inject(quit);
+        }) {
+            Ok(()) => println!("tray icon up (Quit closes the game)"),
+            Err(e) => println!("tray unavailable: {e}"),
+        }
+    }
+
     println!("streaming at {}{}", window.url(),
         if open_browser { " (opened in your browser)" } else { " (paste into a browser)" });
 
@@ -57,12 +90,12 @@ fn main() {
     let mut events_seen = 0u32;
     while running {
         // browser events arrive through the normal windowing seam
-        for event in window.poll() {
+        for event in window.drain() {
             events_seen += 1;
             let kind = event.get("type").as_string().unwrap_or_default();
             match kind.as_str() {
                 "quit" => {
-                    println!("page requested quit after {events_seen} events");
+                    println!("quit requested after {events_seen} events");
                     running = false;
                 }
                 "key" => println!(
@@ -86,16 +119,16 @@ fn main() {
         engine.update(1.0 / 60.0);
         engine.draw();
 
-        // map the ball's world position into the clip-space quad
-        if let Some(world) = engine.physics_mut() {
-            if let Some((pos, _)) = world.body_pose("ball") {
-                renderer.set_quad(
-                    [pos.x / 8.0, 1.0 - (pos.y + 1.0) / 9.0],
-                    [0.08, 0.12],
-                    [1.0, 0.4, 0.1, 1.0],
-                );
-            }
-        }
+        // the scene: floor + ball, +y up on screen (matches physics)
+        let ball_pos = engine
+            .physics_mut()
+            .and_then(|w| w.body_pose("ball"))
+            .map(|(pos, _)| pos)
+            .unwrap_or(Vec3::new(0.0, 8.0, 0.0));
+        renderer.set_scene(&[
+            world_quad(Vec3::new(0.0, 0.0, 0.0), FLOOR_HALF, FLOOR_COLOR),
+            world_quad(ball_pos, BALL_HALF, BALL_COLOR),
+        ]);
         renderer.render_frame();
         std::thread::sleep(std::time::Duration::from_millis(16));
     }

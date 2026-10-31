@@ -45,6 +45,10 @@ pub mod render;
 pub mod render_wgpu;
 #[cfg(feature = "stream")]
 pub mod stream_window;
+#[cfg(feature = "tray")]
+pub mod tray;
+#[cfg(feature = "tray")]
+pub use tray::spawn_tray_quit;
 #[cfg(feature = "winit")]
 pub mod winit_window;
 pub mod transform;
@@ -55,7 +59,7 @@ pub use engine::Engine;
 pub use entity::Entity;
 pub use physics::PhysicsWorld;
 pub use physics_body::PhysicsBody;
-pub use render::RenderBackend;
+pub use render::{Quad, RenderBackend};
 #[cfg(feature = "wgpu")]
 pub use render::FrameSink;
 #[cfg(feature = "wgpu")]

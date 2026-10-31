@@ -3,13 +3,22 @@
 //! and can be saved as PNGs (gold's screenshot debug aid). Tests assert
 //! actual pixels; a window-presenting backend is a later rung.
 
+#[cfg(feature = "winit")]
 use std::sync::Arc;
 
 const WGSL: &str = r#"
-struct Scene {
+struct Quad {
     pos: vec2f,
     size: vec2f,
     color: vec4f,
+};
+
+struct Scene {
+    count: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+    quads: array<Quad, 64>,
 };
 
 @group(0) @binding(0) var<uniform> scene: Scene;
@@ -21,13 +30,15 @@ struct VsOut {
 
 @vertex
 fn vs(@builtin(vertex_index) i: u32) -> VsOut {
-    var corners = array(
+    let quad = i / 6u;              // which quad
+    let corner = i % 6u;            // which of the 6 triangle corners
+    var offsets = array(
         vec2f(-0.5, -0.5), vec2f(0.5, -0.5), vec2f(-0.5, 0.5),
         vec2f(-0.5, 0.5), vec2f(0.5, -0.5), vec2f(0.5, 0.5),
     );
     var out: VsOut;
-    out.pos = vec4f(scene.pos + corners[i] * scene.size, 0.0, 1.0);
-    out.color = scene.color.rgb;
+    out.pos = vec4f(scene.quads[quad].pos + offsets[corner] * scene.quads[quad].size, 0.0, 1.0);
+    out.color = scene.quads[quad].color.rgb;
     return out;
 }
 
@@ -37,39 +48,44 @@ fn fs(in: VsOut) -> @location(0) vec4f {
 }
 "#;
 
-/// The per-frame uniform: one solid quad in clip space.
-#[derive(Clone, Copy)]
-struct Scene {
-    pos: [f32; 2],
-    size: [f32; 2],
-    color: [f32; 4],
-}
+/// The per-frame uniform: up to 64 solid quads. CPU layout must match the
+/// WGSL: `count` + 3 pad words, then 32-byte quads.
+const MAX_QUADS: usize = 64;
+const SCENE_BYTES: usize = 16 + MAX_QUADS * 32;
 
-impl Scene {
-    fn bytes(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(32);
-        for f in self.pos.iter().chain(self.size.iter()).chain(self.color.iter()) {
+fn scene_bytes(quads: &[crate::game::render::Quad]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(SCENE_BYTES);
+    out.extend_from_slice(&(quads.len() as u32).to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    for quad in quads.iter().take(MAX_QUADS) {
+        for f in quad.pos.iter().chain(quad.size.iter()).chain(quad.color.iter()) {
             out.extend_from_slice(&f.to_le_bytes());
         }
-        out
     }
+    out.resize(SCENE_BYTES, 0);
+    out
 }
 
 /// An offscreen wgpu renderer: clears to the set color and draws a solid
 /// test triangle. `screenshot()` returns the last frame as RGBA8 rows.
 pub struct WgpuRenderer {
+    // kept alive for the winit presentation path (surface creation)
+    #[allow(dead_code)]
     instance: wgpu::Instance,
+    #[allow(dead_code)]
     adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::RenderPipeline,
     uniforms: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    scene: Vec<crate::game::render::Quad>,
     target: wgpu::Texture,
     readback: wgpu::Buffer,
     size: (u32, u32),
     clear_color: [f64; 4],
-    scene: Scene,
     frame_sink: Option<crate::game::render::FrameSink>,
     last_frame: Vec<u8>,
     /// When a window is attached, frames present to its surface instead of
@@ -126,7 +142,7 @@ impl WgpuRenderer {
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(32),
+                        min_binding_size: wgpu::BufferSize::new(SCENE_BYTES as u64),
                     },
                     count: None,
                 }],
@@ -163,7 +179,7 @@ impl WgpuRenderer {
         });
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("mercury-scene"),
-            size: 32,
+            size: SCENE_BYTES as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -202,11 +218,7 @@ impl WgpuRenderer {
             readback,
             size: (64, 64),
             clear_color: [0.1, 0.2, 0.3, 1.0],
-            scene: Scene {
-                pos: [0.0, 0.0],
-                size: [0.25, 0.25],
-                color: [1.0, 0.4, 0.1, 1.0],
-            },
+            scene: Vec::new(),
             frame_sink: None,
             last_frame: Vec::new(),
             window: Some((window, surface)),
@@ -244,7 +256,7 @@ impl WgpuRenderer {
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(32),
+                        min_binding_size: wgpu::BufferSize::new(SCENE_BYTES as u64),
                     },
                     count: None,
                 }],
@@ -282,7 +294,7 @@ impl WgpuRenderer {
 
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("mercury-scene"),
-            size: 32,
+            size: SCENE_BYTES as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -310,11 +322,7 @@ impl WgpuRenderer {
             readback,
             size: (width, height),
             clear_color: [0.1, 0.2, 0.3, 1.0],
-            scene: Scene {
-                pos: [0.0, 0.0],
-                size: [0.25, 0.25],
-                color: [1.0, 0.4, 0.1, 1.0],
-            },
+            scene: Vec::new(),
             frame_sink: None,
             last_frame: Vec::new(),
             #[cfg(feature = "winit")]
@@ -328,10 +336,16 @@ impl WgpuRenderer {
         self.clear_color = color;
     }
 
-    /// Place the solid quad (clip-space center and half-extents), with its
-    /// color — the v0 "mesh": enough to see an entity move.
+    /// The scene: solid quads in clip space (center, half-extents, color),
+    /// drawn back-to-front in list order — the v0 "mesh", enough to see
+    /// entities move (max 64).
+    pub fn set_scene(&mut self, quads: &[crate::game::render::Quad]) {
+        self.scene = quads.to_vec();
+    }
+
+    /// Convenience: a single-quad scene.
     pub fn set_quad(&mut self, pos: [f32; 2], size: [f32; 2], color: [f32; 4]) {
-        self.scene = Scene { pos, size, color };
+        self.scene = vec![crate::game::render::Quad { pos, size, color }];
     }
 
     fn offscreen_target(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
@@ -404,7 +418,7 @@ impl WgpuRenderer {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         self.queue
-            .write_buffer(&self.uniforms, 0, &self.scene.bytes());
+            .write_buffer(&self.uniforms, 0, &scene_bytes(&self.scene));
         let clear = wgpu::Color {
             r: self.clear_color[0],
             g: self.clear_color[1],
@@ -430,7 +444,8 @@ impl WgpuRenderer {
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.bind_group, &[]);
-            pass.draw(0..6, 0..1);
+            let quads = self.scene.len().max(1) as u32;
+            pass.draw(0..6 * quads, 0..1);
         }
         self.queue.submit([encoder.finish()]);
     }

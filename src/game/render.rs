@@ -4,6 +4,14 @@
 //! surface needed — so frames can be pixel-tested and screenshotted
 //! headlessly, exactly like gold's `{"screenshot", path}` debug aid.
 
+/// One solid quad in clip space: center `pos`, half-extents `size`, `color`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Quad {
+    pub pos: [f32; 2],
+    pub size: [f32; 2],
+    pub color: [f32; 4],
+}
+
 /// One rendered frame, RGBA8, top to bottom.
 #[derive(Clone, Debug)]
 pub struct Frame {
