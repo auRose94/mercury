@@ -144,10 +144,15 @@ Ported from gold's `game` module, headless first (gold ships a
   register/create registries; `headless` is pre-registered, events cross the
   boundary as `Var` (`o!{ "type": "quit" }`). The **streaming window**
   (behind the `stream` feature) turns the headless render buffer into a
-  browser page: a canvas app auto-opens on launch, frames stream over
+  browser page: a canvas app auto-opens on launch (`--no-open` to skip —
+  paste the URL anywhere, e.g. an embedded browser), frames stream over
   WebSocket (`[w][h][rgba]` binary), and browser keys/mouse/wheel come back
   through `WindowSystem::poll` as `Var` events — the engine can't tell it
-  apart from SDL, and the whole loop is inspectable by an AI or a test.
+  apart from SDL, and the whole loop is inspectable by an AI or a test. The
+  **winit backend** (behind the `winit` feature) is the classic desktop
+  window: the event loop runs on the main thread, the pump on another
+  thread through the same seam, and the renderer presents to the surface
+  directly (resize-aware).
 - **Physics** (behind the `physics` feature) — gold's `world`/`physicsBackend`
   split: a `PhysicsWorldBackend` trait + registry, the built-in no-op `none`
   backend (bodies no-op, transforms stay under script control — gold ships

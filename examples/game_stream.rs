@@ -43,11 +43,15 @@ fn main() {
         .expect("no wgpu adapter on this machine");
     renderer.attach_sink(sink.clone());
 
-    // the streaming window: page auto-opens, browser events come back as Var
+    // the streaming window: browser events come back as Var.
+    // --no-open skips the auto-launch (paste the URL into any browser —
+    // including an embedded one like ZCode's).
+    let open_browser = !std::env::args().any(|a| a == "--no-open");
     let mut window =
-        mercury::game::StreamingWindow::new("127.0.0.1:8400", sink, true)
+        mercury::game::StreamingWindow::new("127.0.0.1:8400", sink, open_browser)
             .expect("stream server");
-    println!("streaming at {}", window.url());
+    println!("streaming at {}{}", window.url(),
+        if open_browser { " (opened in your browser)" } else { " (paste into a browser)" });
 
     let mut running = true;
     let mut events_seen = 0u32;

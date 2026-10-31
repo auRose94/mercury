@@ -45,6 +45,8 @@ pub mod render;
 pub mod render_wgpu;
 #[cfg(feature = "stream")]
 pub mod stream_window;
+#[cfg(feature = "winit")]
+pub mod winit_window;
 pub mod transform;
 pub mod window;
 
@@ -60,5 +62,9 @@ pub use render::FrameSink;
 pub use render_wgpu::WgpuRenderer;
 #[cfg(feature = "stream")]
 pub use stream_window::StreamingWindow;
+#[cfg(feature = "winit")]
+pub use winit_window::{
+    key_var, mouse_button_var, mouse_move_var, quit_var, wheel_var, WinitWindow,
+};
 pub use transform::Transform;
 pub use window::{create_window_backend, register_window_backend, HeadlessWindow, WindowSystem};

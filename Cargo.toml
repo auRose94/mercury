@@ -36,6 +36,7 @@ futures-util = { version = "0.3", optional = true }
 # optional so the core stays lean — gold gates Bullet the same way.
 rapier3d = { version = "0.36", optional = true }
 wgpu = { version = "30", optional = true }
+winit = { version = "0.30", optional = true }
 # blocking on wgpu adapter/device futures for offscreen setup
 pollster = { version = "0.4", optional = true }
 axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }
@@ -51,6 +52,8 @@ web = ["dep:axum", "dep:tokio", "dep:futures-util", "dep:axum-server", "dep:rust
 physics = ["dep:rapier3d"]
 # render: the wgpu offscreen renderer
 wgpu = ["dep:wgpu", "dep:pollster"]
+# window: the winit desktop windowing backend (gold's windowSystemSDL slot)
+winit = ["dep:winit"]
 # stream: the webapp windowing backend (canvas page over the render buffer)
 stream = ["dep:axum", "dep:tokio", "dep:futures-util"]
 
@@ -82,3 +85,7 @@ required-features = ["physics", "wgpu"]
 [[example]]
 name = "game_stream"
 required-features = ["physics", "wgpu", "stream"]
+
+[[example]]
+name = "game_window"
+required-features = ["physics", "wgpu", "winit"]
