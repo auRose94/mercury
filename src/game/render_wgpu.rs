@@ -488,10 +488,15 @@ impl super::render::RenderBackend for WgpuRenderer {
             return;
         }
         if let Some(camera) = &self.camera {
-            let clip = camera.world_to_clip(crate::var::Vec3::new(
+            // position AND size transform: half-extents divide by the view's
+            // half-extents, or every quad renders at the wrong scale
+            quad.pos = camera.world_to_clip(crate::var::Vec3::new(
                 quad.pos[0], quad.pos[1], 0.0,
             ));
-            quad.pos = clip;
+            quad.size = [
+                quad.size[0] / camera.half_extents.x,
+                quad.size[1] / camera.half_extents.y,
+            ];
         }
         self.scene.push(quad);
     }

@@ -122,6 +122,13 @@ async fn entity_meshrenderer_renders_through_camera() {
     let frame = sink.latest().expect("no frame published");
     let center = pixel(&frame.rgba, frame.width, frame.width / 2, frame.height / 2);
     assert_close(center, [srgb8(1.0), 0, 0, 255], "center");
+
+    // the quad is 1 world half-unit tall on a 5-half-unit view → it spans
+    // 1/5 of the canvas height: an edge just inside the boundary must be
+    // red too (a scale bug shrinks or grows the quad from the center)
+    let edge_y = 135 - (1.0 / 5.0 * 135.0) as u32 + 3;
+    let edge = pixel(&frame.rgba, frame.width, frame.width / 2, edge_y);
+    assert_close(edge, [srgb8(1.0), 0, 0, 255], "quad edge");
 }
 
 /// A child entity renders at its COMPOSED world transform — gold's

@@ -11,9 +11,8 @@ use std::thread;
 
 use hydrargyros::game::physics::Shape;
 use hydrargyros::game::renderable::MeshRenderer;
+use hydrargyros::game::camera::Camera;
 use hydrargyros::game::winit_window::WinitWindow;
-use hydrargyros::game::window::WindowSystem;
-use hydrargyros::game::RenderBackend;
 use hydrargyros::game::{Engine, Entity, PhysicsBody, PhysicsWorld, WgpuRenderer};
 use hydrargyros::var::Vec3;
 use hydrargyros::Var;
@@ -31,7 +30,7 @@ fn main() {
 
     // the pump: engine + renderer on another thread
     // the pump handle doubles as the closer (both share the loop's state)
-    let mut pump_window = window.pump_handle();
+    let pump_window = window.pump_handle();
     let closer = window.pump_handle();
     let pump = thread::spawn(move || {
         // wait for the window (created when the event loop resumes)
@@ -49,7 +48,7 @@ fn main() {
             return;
         };
 
-        let mut renderer = match pollster::block_on(WgpuRenderer::new_for_window(
+        let renderer = match pollster::block_on(WgpuRenderer::new_for_window(
             winit_window,
         )) {
             Ok(r) => r,
@@ -64,6 +63,8 @@ fn main() {
         engine.frame_time(0.0);
         engine.fixed_dt(1.0 / 60.0);
         engine.set_physics(PhysicsWorld::create("rapier", &Var::Null).unwrap());
+        engine.set_camera(Camera::default());
+        engine.set_renderer(Box::new(renderer));
 
         let mut floor = Entity::new("floor");
         floor.add_component(Box::new(
@@ -82,25 +83,9 @@ fn main() {
         engine.add_entity(ball);
 
         println!("pumping: watch the ball fall; close the window to quit");
-        let mut running = true;
-        while running {
-            // windowing seam: winit events arrive as Vars
-            for event in pump_window.poll() {
-                if event.get("type").as_string().as_deref() == Some("quit") {
-                    running = false;
-                }
-            }
-            if !running {
-                break;
-            }
-
-            engine.update(1.0 / 60.0);
-            engine.draw();
-
-            // the draw pass emits the entities' MeshRenderers through the camera
-            renderer.render_frame();
-            thread::sleep(std::time::Duration::from_millis(16));
-        }
+        // the pump: polls winit events, updates, draws the MeshRenderers,
+        // presents to the surface — exits on the window's close button
+        engine.start_with(Box::new(pump_window));
         closer.request_close();
     });
 

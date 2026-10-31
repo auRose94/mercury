@@ -13,9 +13,8 @@
 
 use hydrargyros::game::physics::Shape as PhysShape;
 use hydrargyros::game::render::FrameSink;
-use hydrargyros::game::RenderBackend;
 use hydrargyros::game::renderable::MeshRenderer;
-use hydrargyros::game::{Engine, Entity, PhysicsBody, PhysicsWorld, WgpuRenderer};
+use hydrargyros::game::{Camera, Engine, Entity, PhysicsBody, PhysicsWorld, WgpuRenderer};
 use hydrargyros::var::Vec3;
 use hydrargyros::Var;
 
@@ -47,6 +46,8 @@ fn main() {
     let mut renderer = pollster::block_on(WgpuRenderer::new_offscreen(480, 270))
         .expect("no wgpu adapter on this machine");
     renderer.attach_sink(sink.clone());
+    engine.set_renderer(Box::new(renderer));
+    engine.set_camera(Camera::default());
 
     #[cfg(not(feature = "tray"))]
     println!("(build with --features tray for a system-tray quit button)");
@@ -76,42 +77,9 @@ fn main() {
     println!("streaming at {}{}", window.url(),
         if open_browser { " (opened in your browser)" } else { " (paste into a browser)" });
 
-    let mut running = true;
-    let mut events_seen = 0u32;
-    while running {
-        // browser events arrive through the normal windowing seam
-        for event in window.drain() {
-            events_seen += 1;
-            let kind = event.get("type").as_string().unwrap_or_default();
-            match kind.as_str() {
-                "quit" => {
-                    println!("quit requested after {events_seen} events");
-                    running = false;
-                }
-                "key" => println!(
-                    "key {:?} {}",
-                    event.get("key").as_string().unwrap_or_default(),
-                    if event.get("pressed").as_bool() == Some(true) { "down" } else { "up" }
-                ),
-                "mouse" => println!(
-                    "mouse {} at ({}, {})",
-                    event.get("action").as_string().unwrap_or_default(),
-                    event.get("x").as_i64().unwrap_or(0),
-                    event.get("y").as_i64().unwrap_or(0),
-                ),
-                other => println!("event {other:?}"),
-            }
-        }
-        if !running {
-            break;
-        }
+    // the pump: polls the page, updates, draws the MeshRenderers, renders —
+    // exits when the page's Quit button arrives through the event seam
+    engine.start_with(Box::new(window));
 
-        engine.update(1.0 / 60.0);
-        // the draw pass emits the entities' MeshRenderers through the camera
-        engine.draw();
-        renderer.render_frame();
-        std::thread::sleep(std::time::Duration::from_millis(16));
-    }
-
-    println!("done: {events_seen} browser events handled");
+    println!("done — streamed until quit");
 }
