@@ -38,13 +38,18 @@ fn hydrargyros_glyph() -> Vec<u8> {
     for y in 0..SIZE {
         for x in 0..SIZE {
             let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
-            // ☿ proportions on a 32×32 grid: horns arc (16, 9.5) r 6.5;
-            // ring (16, 17.5) r 6; stem down to y=30 with a crossbar at 28
-            let mut d = ring(px, py, 16.0, 17.5, 6.0, 1.4).min(
-                ring(px, py, 16.0, 9.5, 6.5, 1.3),
-            );
-            d = d.min(capsule(px, py, 16.0, 24.0, 16.0, 30.0, 1.3));
-            d = d.min(capsule(px, py, 12.0, 28.0, 20.0, 28.0, 1.3));
+            // ☿ proportions on a 32×32 grid: main ring (16, 19.5) r 5.5;
+            // the horns are the LOWER HALF of a narrow arc (16, 10) r 3.5 —
+            // a cup resting on the ring's top, horns pointing up; the stem
+            // drops from the ring with a crossbar
+            let ring_d = ring(px, py, 16.0, 19.5, 5.5, 1.2);
+            let horns_d = {
+                let d = ring(px, py, 16.0, 9.0, 3.5, 1.1);
+                d.max(9.0 - py) // clip to the lower half: a cup, horns up
+            };
+            let mut d = ring_d.min(horns_d);
+            d = d.min(capsule(px, py, 16.0, 24.5, 16.0, 30.0, 1.2));
+            d = d.min(capsule(px, py, 12.5, 28.0, 19.5, 28.0, 1.2));
             let a = if d <= 0.0 { 255 } else { coverage(d) };
             rgba.extend_from_slice(&[r, g, b, a]);
         }
@@ -128,4 +133,28 @@ where
         .map_err(|e| format!("tray event thread: {e}"))?;
 
     Ok(tray)
+}
+
+#[cfg(test)]
+mod tests {
+    /// Visual check: dump the glyph upscaled 8× so a human (or agent) can
+    /// read the image and confirm the ☿ shape.
+    #[test]
+    fn glyph_renders_as_png() {
+        let rgba = super::hydrargyros_glyph();
+        let (w, h, scale) = (32u32, 32u32, 8u32);
+        let mut img = image::RgbaImage::new(w * scale, h * scale);
+        for y in 0..h * scale {
+            for x in 0..w * scale {
+                let sx = (x / scale) as usize * 4;
+                let sy = (y / scale) as usize;
+                let base = sy * (w as usize) * 4;
+                img.put_pixel(x, y, image::Rgba([
+                    rgba[base + sx], rgba[base + sx + 1],
+                    rgba[base + sx + 2], rgba[base + sx + 3],
+                ]));
+            }
+        }
+        img.save("/tmp/hydrargyros_tray_glyph.png").unwrap();
+    }
 }
