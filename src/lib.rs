@@ -1,6 +1,6 @@
-//! # Mercury
+//! # Hydrargyros ☿
 //!
-//! A Rust reimagining of **gold** — a framework whose thesis is *high-level,
+//! A Rust reimagining of **gold** — hydrargyros, the Greek name for mercury (Hg) — — a framework whose thesis is *high-level,
 //! JavaScript-like ergonomics for prototyping without sacrificing speed*.
 //!
 //! Mercury ports gold's core (`var`/`object`/`list` with prototype
@@ -10,12 +10,12 @@
 //! mutate through handles the way gold does.
 //!
 //! ```
-//! use mercury::{o, Var};
+//! use hydrargyros::{o, Var};
 //!
 //! let user = o!{
 //!     "name": "bob",
 //!     "age": 30i64,
-//!     "tags": mercury::a!["admin", "dev"],
+//!     "tags": hydrargyros::a!["admin", "dev"],
 //!     "stats": o!{ "score": 9i64 },
 //! };
 //!
@@ -42,7 +42,7 @@ pub mod web;
 
 pub use from_var::{FromVar, FromVarError};
 pub use list::List;
-pub use mercury_derive::FromVar;
+pub use hydrargyros_derive::FromVar;
 pub use object::Object;
 pub use proxy::VarRef;
 pub use var::{Func, Null, Quat, Ty, Var, Vec3, Vec4};

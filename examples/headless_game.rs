@@ -5,9 +5,9 @@
 //! Run:
 //!   cargo run --example headless_game
 
-use mercury::game::component::{Component, Priority};
-use mercury::game::{Engine, Entity, HeadlessWindow};
-use mercury::{o, FromVar, Var};
+use hydrargyros::game::component::{Component, Priority};
+use hydrargyros::game::{Engine, Entity, HeadlessWindow};
+use hydrargyros::{o, FromVar, Var};
 
 // ---- the typed config seam: Var in the prototype, structs in the loop ----
 
@@ -26,7 +26,7 @@ struct Player {
 }
 
 impl Player {
-    fn from_config(config: &Var) -> Result<Self, mercury::FromVarError> {
+    fn from_config(config: &Var) -> Result<Self, hydrargyros::FromVarError> {
         Ok(Player { config: PlayerConfig::from_var(config)?, x: 0.0, frames: 0 })
     }
 }

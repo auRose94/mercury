@@ -1,20 +1,20 @@
-# Mercury
+# Hydrargyros ☿
 
 A Rust reimagining of [gold](https://github.com/) — a framework whose thesis is
 *high-level, JavaScript-like ergonomics for prototyping without sacrificing
-speed*. Mercury carries that thesis forward in Rust, where the type system lets
+speed*. Hydrargyros carries that thesis forward in Rust, where the type system lets
 it be safer *and* friendlier.
 
-Mercury is a standalone project. It is **not** a gold branch. Gold (the C++
+Hydrargyros is a standalone project. It is **not** a gold branch. Gold (the C++
 codebase) is untouched by this repo.
 
-> **Name:** gold is **Au**, Mercury is **Hg** — both chemical-element metals.
+> **Name:** gold is **Au**, hydrargyros is the Greek name for mercury — **Hg**, the symbol ☿ — both chemical-element metals.
 > The pairing is a joke *and* a signal.
 
 ## The idea
 
 gold's unique move was adding accessible, JS-like syntax on top of a fast core.
-Mercury does the same, but honest about where Rust can and can't copy
+Hydrargyros does the same, but honest about where Rust can and can't copy
 JavaScript:
 
 - **Faithful ports:** the `Var` value, prototype-based objects, ordered lists,
@@ -28,7 +28,7 @@ JavaScript:
 ## Quick start
 
 ```rust
-use mercury::{a, o, Null, Var};
+use hydrargyros::{a, o, Null, Var};
 
 // object / array literals read like JS
 let user = o! {

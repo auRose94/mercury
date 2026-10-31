@@ -15,11 +15,11 @@ use crate::var::Var;
 /// Nestable.
 ///
 /// ```
-/// use mercury::{o, Var};
+/// use hydrargyros::{o, Var};
 /// let user = o!{
 ///     "name": "bob",
 ///     "age": 30i64,
-///     "tags": mercury::a!["admin", "dev"],
+///     "tags": hydrargyros::a!["admin", "dev"],
 ///     "stats": o!{ "score": 9i64 },
 /// };
 /// assert_eq!(user.get("name").as_str(), Some("bob"));
@@ -45,7 +45,7 @@ macro_rules! o {
 /// Build a list/array literal. Nestable.
 ///
 /// ```
-/// use mercury::a;
+/// use hydrargyros::a;
 /// let xs = a![1i64, 2, 3];
 /// assert_eq!(xs.len(), 3);
 /// ```
@@ -69,7 +69,7 @@ macro_rules! a {
 /// `tpl`). For inline interpolation prefer Rust's native `format!("...{x}")`.
 ///
 /// ```
-/// use mercury::tpl;
+/// use hydrargyros::tpl;
 /// let s = tpl!("Hello $0, you scored $1", "bob", 9i64);
 /// assert_eq!(s, "Hello bob, you scored 9");
 /// ```
@@ -114,7 +114,7 @@ macro_rules! tpl {
 ///   list instead of named args.
 ///
 /// ```
-/// use mercury::{func, Var};
+/// use hydrargyros::{func, Var};
 ///
 /// let add = func!(|a, b| a + b);
 /// assert_eq!(add.call(&[Var::from(2i64), Var::from(3i64)]).as_i64(), Some(5));

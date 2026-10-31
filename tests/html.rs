@@ -1,7 +1,7 @@
 //! HTML builder + parser tests, ported from gold's webTest.cpp suite.
 
-use mercury::web::html::{self as h, Node};
-use mercury::{a, o};
+use hydrargyros::web::html::{self as h, Node};
+use hydrargyros::{a, o};
 
 #[test]
 fn parser_nested_tree() {

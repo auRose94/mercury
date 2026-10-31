@@ -12,9 +12,9 @@
 //! event is just `o!{ "type": "quit" }`).
 //!
 //! ```
-//! use mercury::game::component::Component;
-//! use mercury::game::{Engine, Entity, HeadlessWindow};
-//! use mercury::{o, Var};
+//! use hydrargyros::game::component::Component;
+//! use hydrargyros::game::{Engine, Entity, HeadlessWindow};
+//! use hydrargyros::{o, Var};
 //!
 //! struct Counter(u64);
 //! impl Component for Counter {

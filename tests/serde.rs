@@ -1,7 +1,7 @@
 //! Serde round-trip tests: Var serializes to / from any serde format.
 //! JSON is the representative one (via serde_json).
 
-use mercury::{a, func, o, Null, Var};
+use hydrargyros::{a, func, o, Null, Var};
 
 #[test]
 fn roundtrip_scalar() {

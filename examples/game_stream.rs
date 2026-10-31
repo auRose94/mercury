@@ -11,20 +11,24 @@
 //! fall; press keys, click around — events print in the console; hit the
 //! page's quit button to end the pump.
 
-use mercury::game::physics::Shape as PhysShape;
-use mercury::game::render::{FrameSink, Quad};
-use mercury::game::RenderBackend;
-use mercury::game::{Engine, Entity, PhysicsBody, PhysicsWorld, WgpuRenderer};
-use mercury::var::Vec3;
-use mercury::Var;
+use hydrargyros::game::physics::Shape as PhysShape;
+use hydrargyros::game::render::{FrameSink, Quad};
+use hydrargyros::game::RenderBackend;
+use hydrargyros::game::{Engine, Entity, PhysicsBody, PhysicsWorld, WgpuRenderer};
+use hydrargyros::var::Vec3;
+use hydrargyros::Var;
 
-/// World → clip mapping shared by the whole scene: x ∈ [-8, 8], y ∈ [-1, 9],
+/// World → clip mapping shared by the whole scene: x ∈ [-8.89, 8.89],
+/// y ∈ [-1, 9] — a 16:9 world on a 16:9 canvas, so pixels are square —
 /// with +y UP on the screen (world and screen agree, so gravity reads
 /// as "down").
 fn world_quad(pos: Vec3, half_extents: Vec3, color: [f32; 4]) -> Quad {
+    const X_HALF_RANGE: f32 = 8.89; // 5 * 16/9: square pixels at 16:9
+    const Y_BOTTOM: f32 = -1.0;
+    const Y_RANGE: f32 = 10.0;
     Quad {
-        pos: [pos.x / 8.0, 2.0 * (pos.y + 1.0) / 10.0 - 1.0],
-        size: [half_extents.x / 8.0, 2.0 * half_extents.y / 10.0],
+        pos: [pos.x / X_HALF_RANGE, 2.0 * (pos.y - Y_BOTTOM) / Y_RANGE - 1.0],
+        size: [half_extents.x / X_HALF_RANGE, 2.0 * half_extents.y / Y_RANGE],
         color,
     }
 }
@@ -66,7 +70,7 @@ fn main() {
     // including an embedded one like ZCode's).
     let open_browser = !std::env::args().any(|a| a == "--no-open");
     let window =
-        mercury::game::StreamingWindow::new("127.0.0.1:8400", sink, open_browser)
+        hydrargyros::game::StreamingWindow::new("127.0.0.1:8400", sink, open_browser)
             .expect("stream server");
     let window = std::sync::Arc::new(window);
 
@@ -75,7 +79,7 @@ fn main() {
     #[cfg(feature = "tray")]
     {
         let window = window.clone();
-        match mercury::game::spawn_tray_quit("mercury (streaming)", move |quit| {
+        match hydrargyros::game::spawn_tray_quit("mercury (streaming)", move |quit| {
             window.inject(quit);
         }) {
             Ok(()) => println!("tray icon up (Quit closes the game)"),

@@ -8,9 +8,9 @@
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use mercury::game::render::FrameSink;
-use mercury::game::window::WindowSystem;
-use mercury::game::{RenderBackend, StreamingWindow, WgpuRenderer};
+use hydrargyros::game::render::FrameSink;
+use hydrargyros::game::window::WindowSystem;
+use hydrargyros::game::{RenderBackend, StreamingWindow, WgpuRenderer};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message as WsMsg;

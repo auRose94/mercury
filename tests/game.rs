@@ -4,11 +4,11 @@
 
 use std::sync::{Arc, Mutex};
 
-use mercury::game::component::{Component, Priority};
-use mercury::game::window::{create_window_backend, register_window_backend, WindowSystem};
-use mercury::game::{Engine, Entity, Transform};
-use mercury::var::{Quat, Vec3};
-use mercury::{o, Var};
+use hydrargyros::game::component::{Component, Priority};
+use hydrargyros::game::window::{create_window_backend, register_window_backend, WindowSystem};
+use hydrargyros::game::{Engine, Entity, Transform};
+use hydrargyros::var::{Quat, Vec3};
+use hydrargyros::{o, Var};
 
 /// Logs the frame order of whatever components wear it.
 #[derive(Clone)]
@@ -90,7 +90,7 @@ fn headless_pump_runs_scripted_events_then_quits() {
         Var::from(o!{ "type": "mouse", "x": 3 }),
     ];
     engine.start_with(Box::new(
-        mercury::game::HeadlessWindow::with_events(events),
+        hydrargyros::game::HeadlessWindow::with_events(events),
     ));
 
     assert!(!engine.running());
@@ -176,14 +176,14 @@ fn window_backend_registry() {
     // custom backends register under a name
     register_window_backend(
         "always-quit",
-        Arc::new(|_config| Ok(Box::new(mercury::game::HeadlessWindow::with_events([])) as Box<dyn WindowSystem>)),
+        Arc::new(|_config| Ok(Box::new(hydrargyros::game::HeadlessWindow::with_events([])) as Box<dyn WindowSystem>)),
     );
     assert!(create_window_backend("always-quit", &Var::Null).is_ok());
 }
 
 #[test]
 fn settings_roundtrip() {
-    let dir = std::env::temp_dir().join("mercury_engine_settings_test");
+    let dir = std::env::temp_dir().join("hydrargyros_engine_settings_test");
     let mut engine = Engine::new("acme", "settings-test");
     engine.settings_root(&dir);
 
@@ -226,9 +226,9 @@ fn window_trait_is_object_safe_over_threads() {
 
 #[test]
 fn none_backend_keeps_transforms_under_script_control() {
-    use mercury::game::{PhysicsBody, PhysicsWorld};
-    use mercury::var::Vec3;
-    use mercury::game::physics::Shape;
+    use hydrargyros::game::{PhysicsBody, PhysicsWorld};
+    use hydrargyros::var::Vec3;
+    use hydrargyros::game::physics::Shape;
 
     let mut engine = Engine::new("acme", "none-physics");
     engine.set_physics(PhysicsWorld::none());
@@ -249,9 +249,9 @@ fn none_backend_keeps_transforms_under_script_control() {
 #[cfg(feature = "physics")]
 #[test]
 fn rapier_world_syncs_falling_poses_into_transforms() {
-    use mercury::game::{PhysicsBody, PhysicsWorld};
-    use mercury::var::Vec3;
-    use mercury::game::physics::Shape;
+    use hydrargyros::game::{PhysicsBody, PhysicsWorld};
+    use hydrargyros::var::Vec3;
+    use hydrargyros::game::physics::Shape;
 
     let mut engine = Engine::new("acme", "rapier-sync");
     engine.frame_time(0.0);

@@ -10,8 +10,8 @@
 //! lives in a `.index.json` file that never surfaces as a document.
 //!
 //! ```
-//! use mercury::web::store::Store;
-//! use mercury::{o, Var};
+//! use hydrargyros::web::store::Store;
+//! use hydrargyros::{o, Var};
 //!
 //! # fn demo(dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
 //! let store = Store::open("mydb", dir)?;

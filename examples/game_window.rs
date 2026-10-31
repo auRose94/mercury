@@ -9,18 +9,18 @@
 
 use std::thread;
 
-use mercury::game::physics::Shape;
-use mercury::game::render::Quad;
-use mercury::game::winit_window::WinitWindow;
-use mercury::game::window::WindowSystem;
-use mercury::game::RenderBackend;
-use mercury::game::{Engine, Entity, PhysicsBody, PhysicsWorld, WgpuRenderer};
-use mercury::var::Vec3;
-use mercury::Var;
+use hydrargyros::game::physics::Shape;
+use hydrargyros::game::render::Quad;
+use hydrargyros::game::winit_window::WinitWindow;
+use hydrargyros::game::window::WindowSystem;
+use hydrargyros::game::RenderBackend;
+use hydrargyros::game::{Engine, Entity, PhysicsBody, PhysicsWorld, WgpuRenderer};
+use hydrargyros::var::Vec3;
+use hydrargyros::Var;
 
 fn main() {
     // the event loop + window: created and run on the main thread
-    let window = match WinitWindow::new("mercury — game window", (800, 450)) {
+    let window = match WinitWindow::new("☿ hydrargyros — game window", (800, 450)) {
         Ok(w) => w,
         Err(e) => {
             eprintln!("no windowing system: {e}");
@@ -65,11 +65,15 @@ fn main() {
         engine.fixed_dt(1.0 / 60.0);
         engine.set_physics(PhysicsWorld::create("rapier", &Var::Null).unwrap());
 
-        // world → clip: x ∈ [-8, 8], y ∈ [-1, 9], +y up on screen
+        // world → clip: x ∈ [-8.89, 8.89], y ∈ [-1, 9] — a 16:9 world on a
+        // 16:9 canvas (square pixels), +y up on screen
         fn world_quad(pos: Vec3, half_extents: Vec3, color: [f32; 4]) -> Quad {
+            const X_HALF_RANGE: f32 = 8.89; // 5 * 16/9
+            const Y_BOTTOM: f32 = -1.0;
+            const Y_RANGE: f32 = 10.0;
             Quad {
-                pos: [pos.x / 8.0, 2.0 * (pos.y + 1.0) / 10.0 - 1.0],
-                size: [half_extents.x / 8.0, 2.0 * half_extents.y / 10.0],
+                pos: [pos.x / X_HALF_RANGE, 2.0 * (pos.y - Y_BOTTOM) / Y_RANGE - 1.0],
+                size: [half_extents.x / X_HALF_RANGE, 2.0 * half_extents.y / Y_RANGE],
                 color,
             }
         }

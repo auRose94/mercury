@@ -1,8 +1,8 @@
 [package]
-name = "mercury-derive"
+name = "hydrargyros-derive"
 version = "0.1.0"
 edition = "2021"
-description = "Derive macros for Mercury — FromVar turns a Var object into a typed struct for the hot path."
+description = "Derive macros for Hydrargyros — FromVar turns a Var object into a typed struct for the hot path."
 license = "MIT"
 
 [lib]

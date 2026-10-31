@@ -1,8 +1,8 @@
 [package]
-name = "mercury"
+name = "hydrargyros"
 version = "0.1.0"
 edition = "2021"
-description = "Mercury — a Rust reimagining of gold: JS-like dynamic values (var) with copy-on-write ergonomics, plus the sugar that makes prototyping feel like JavaScript."
+description = "Hydrargyros — a Rust reimagining of gold (the Greek name for mercury, Hg): JS-like dynamic values (var) with copy-on-write ergonomics, plus the sugar that makes prototyping feel like JavaScript."
 license = "MIT"
 
 [workspace]
@@ -23,8 +23,8 @@ members = ["derive"]
 [dependencies]
 indexmap = "2"
 serde = { version = "1", features = ["derive"] }
-# FromVar: the typed hot-path seam (re-exported as mercury::FromVar)
-mercury-derive = { path = "derive", version = "0.1.0" }
+# FromVar: the typed hot-path seam (re-exported as hydrargyros::FromVar)
+hydrargyros-derive = { path = "derive", version = "0.1.0" }
 # store documents are JSON files; http responses are JSON
 serde_json = "1"
 axum = { version = "0.8", features = ["ws"], optional = true }

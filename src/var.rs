@@ -218,10 +218,10 @@ impl std::fmt::Debug for Func {
 /// The universal dynamic value.
 ///
 /// ```
-/// use mercury::Var;
+/// use hydrargyros::Var;
 /// let v = Var::from(42i64);
 /// assert_eq!(v.as_i64(), Some(42));
-/// assert_eq!(v.ty(), mercury::Ty::I64);
+/// assert_eq!(v.ty(), hydrargyros::Ty::I64);
 /// ```
 #[derive(Clone)]
 pub enum Var {
@@ -277,12 +277,12 @@ impl PartialEq for Var {
 }
 
 /// The JS-style `null` value. Write it as a bare literal instead of
-/// `Var::Null` / `mercury::Ty::Null`:
+/// `Var::Null` / `hydrargyros::Ty::Null`:
 ///
 /// ```
-/// use mercury::Null;
-/// let v = mercury::Var::from(Null);
-/// assert_eq!(v.ty(), mercury::Ty::Null);
+/// use hydrargyros::Null;
+/// let v = hydrargyros::Var::from(Null);
+/// assert_eq!(v.ty(), hydrargyros::Ty::Null);
 /// ```
 #[allow(non_upper_case_globals)]
 pub const Null: Var = Var::Null;

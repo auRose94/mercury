@@ -3,9 +3,9 @@
 
 #![cfg(feature = "physics")]
 
-use mercury::game::physics::{BodyType, PhysicsWorld, Shape};
-use mercury::var::{Quat, Vec3};
-use mercury::Var;
+use hydrargyros::game::physics::{BodyType, PhysicsWorld, Shape};
+use hydrargyros::var::{Quat, Vec3};
+use hydrargyros::Var;
 
 #[test]
 fn gravity_pulls_dynamic_bodies_down() {

@@ -21,13 +21,14 @@ use crate::game::window::WindowSystem;
 use crate::var::Var;
 
 const PAGE: &str = r#"<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"><title>Mercury — streaming window</title>
+<html lang="en"><head><meta charset="utf-8"><title>☿ Hydrargyros — streaming window</title>
 <style>
 body { margin: 0; background: #14161a; color: #e8e6e3; font-family: system-ui, sans-serif;
        display: flex; flex-direction: column; align-items: center; gap: .75rem;
        padding: 1rem; height: 100vh; box-sizing: border-box; }
 canvas { image-rendering: pixelated; border: 1px solid #2a2e36; border-radius: 8px;
-         max-width: 96vw; max-height: 82vh; background: #000; }
+         max-width: 96vw; max-height: 78vh; background: #000; }
+#glyph { margin: 0; font-size: 2rem; color: #dce0e8; font-weight: 400; }
 body.fit canvas { width: 96vw; height: auto; max-height: 82vh; }
 .row { display: flex; align-items: center; gap: 1.25rem; }
 button { background: #4f6df5; color: #fff; border: 0; border-radius: 6px; padding: .4rem 1rem; }
@@ -35,6 +36,7 @@ button.secondary { background: #2a2e36; color: #e8e6e3; }
 #status { color: #9aa3b2; font-size: .85rem; margin: 0 1.5rem; min-width: 6rem; }
 </style></head>
 <body>
+<h1 id="glyph" title="hydrargyros — Hg">☿</h1>
 <canvas id="screen" width="320" height="180"></canvas>
 <div class="row">
   <button id="quit">quit</button>
@@ -116,7 +118,7 @@ impl StreamingWindow {
         let url = format!("http://{addr}/");
 
         let handle = std::thread::Builder::new()
-            .name("mercury-stream".to_string())
+            .name("hydrargyros-stream".to_string())
             .spawn(move || {
                 let runtime = tokio::runtime::Builder::new_current_thread()
                     .enable_all()

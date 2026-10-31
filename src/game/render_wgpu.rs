@@ -33,8 +33,8 @@ fn vs(@builtin(vertex_index) i: u32) -> VsOut {
     let quad = i / 6u;              // which quad
     let corner = i % 6u;            // which of the 6 triangle corners
     var offsets = array(
-        vec2f(-0.5, -0.5), vec2f(0.5, -0.5), vec2f(-0.5, 0.5),
-        vec2f(-0.5, 0.5), vec2f(0.5, -0.5), vec2f(0.5, 0.5),
+        vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(-1.0, 1.0),
+        vec2f(-1.0, 1.0), vec2f(1.0, -1.0), vec2f(1.0, 1.0),
     );
     var out: VsOut;
     out.pos = vec4f(scene.quads[quad].pos + offsets[corner] * scene.quads[quad].size, 0.0, 1.0);
@@ -130,7 +130,7 @@ impl WgpuRenderer {
             .map_err(|e| format!("wgpu device: {e}"))?;
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("mercury-quad"),
+            label: Some("hydrargyros-quad"),
             source: wgpu::ShaderSource::Wgsl(WGSL.into()),
         });
         let bind_group_layout =
@@ -153,7 +153,7 @@ impl WgpuRenderer {
             immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("mercury-quad"),
+            label: Some("hydrargyros-quad"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -178,7 +178,7 @@ impl WgpuRenderer {
             multiview_mask: None,
         });
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("mercury-scene"),
+            label: Some("hydrargyros-scene"),
             size: SCENE_BYTES as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
@@ -244,7 +244,7 @@ impl WgpuRenderer {
             .map_err(|e| format!("wgpu device: {e}"))?;
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("mercury-quad"),
+            label: Some("hydrargyros-quad"),
             source: wgpu::ShaderSource::Wgsl(WGSL.into()),
         });
         let bind_group_layout =
@@ -267,7 +267,7 @@ impl WgpuRenderer {
             immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("mercury-quad"),
+            label: Some("hydrargyros-quad"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -293,7 +293,7 @@ impl WgpuRenderer {
         });
 
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("mercury-scene"),
+            label: Some("hydrargyros-scene"),
             size: SCENE_BYTES as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
@@ -350,7 +350,7 @@ impl WgpuRenderer {
 
     fn offscreen_target(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
         device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("mercury-offscreen"),
+            label: Some("hydrargyros-offscreen"),
             size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
             mip_level_count: 1,
             sample_count: 1,
@@ -364,7 +364,7 @@ impl WgpuRenderer {
     fn offscreen_readback(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Buffer {
         let bytes_per_row = (width * 4).div_ceil(256) * 256;
         device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("mercury-readback"),
+            label: Some("hydrargyros-readback"),
             size: (bytes_per_row * height) as u64,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
@@ -427,7 +427,7 @@ impl WgpuRenderer {
         };
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("mercury-frame"),
+                label: Some("hydrargyros-frame"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view,
                     resolve_target: None,

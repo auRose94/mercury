@@ -1,18 +1,18 @@
-# Mercury roadmap
+# Hydrargyros ☿ roadmap
 
-Mercury is a standalone Rust project: a reimagining of **gold** (the C++20/26
+Hydrargyros is a standalone Rust project: a reimagining of **gold** (the C++20/26
 framework) whose thesis is *high-level, JavaScript-like ergonomics for
-prototyping without sacrificing speed*. Mercury is **not** a gold branch — it
+prototyping without sacrificing speed*. Hydrargyros is **not** a gold branch — it
 lives in its own repo and is free to diverge. Gold stays untouched.
 
-The name is a deliberate joke and a real signal: gold is **Au**, Mercury is
+The name is a deliberate joke and a real signal: gold is **Au**, Hydrargyros is
 **Hg** — both are chemical-element metals, so the pairing keeps the parallel.
-Mercury is also the swift messenger, fitting the "fast prototyping" goal.
+The planet and the swift messenger god, fitting the "fast prototyping" goal.
 
 ## Core thesis
 
 gold's unique idea is adding accessible, JS-like syntax on top of a fast core.
-Mercury carries that forward but is honest about where Rust can and can't
+Hydrargyros carries that forward but is honest about where Rust can and can't
 copy JavaScript:
 
 - **What ports faithfully:** the `var` value, prototype-based objects,
@@ -63,7 +63,7 @@ Key design choices:
 - **`o!`/`a!`** (renamed from `jo!`/`ja!`): `o` reads as "object" instantly;
   the `j` was only there to disambiguate for C++/HTML keywords.
 
-## Where Mercury goes from here
+## Where Hydrargyros goes from here
 
 The plan follows gold's own module structure, adapted to Rust's ecosystem
 rather than reinventing wheels.
@@ -76,17 +76,17 @@ rather than reinventing wheels.
   (`"user.stats.score": expected int, found string`), `rename`/`default`
   field options, and `Option`/`Vec`/nested-struct support. Prototyping code
   passes `Var`; the hot loop works with real types. Lives in the
-  `mercury-derive` proc-macro crate, re-exported at `mercury::FromVar`.
+  `hydrargyros-derive` proc-macro crate, re-exported at `hydrargyros::FromVar`.
 - Functions (done): `Func` carries a stable id, so `Var` equality compares
   functions by id — clones equal their original; fresh functions never compare
   equal. Still open: the id→Func registry for serde round-tripping.
 
 ### 2. Web module
 
-gold had a web/UI layer; Mercury's web layer leans on Rust's mature HTTP
+gold had a web/UI layer; Hydrargyros's web layer leans on Rust's mature HTTP
 ecosystem instead of reinventing it.
 
-*Server facade (gold parity) + the sibling parsers/store:* `mercury::web`
+*Server facade (gold parity) + the sibling parsers/store:* `hydrargyros::web`
 mirrors gold's `web::server` — `get`/`post`/`put`/`patch`/`delete`/`options`
 routes with `:param` and trailing-`*` patterns (gold's uWS conventions),
 requests staged as `Var` (`method`/`path`/`params`/`query`/`headers` + a body
@@ -119,7 +119,7 @@ facade ships only the `"file"` backend, like gold.
   wheel for request/response handling.
 - **`socket2`** underneath where we need low-level socket control that hyper
   doesn't expose.
-- **`tokio` + `futures`** for async. Mercury's data flows through `Var`, so a
+- **`tokio` + `futures`** for async. Hydrargyros's data flows through `Var`, so a
   request handler is just a function `Var -> Var` (input params → response),
   which composes beautifully with async: `async fn handler(req: Var) -> Var`.
 - The goal: an expressjs-like surface where routes are JS-style closures over
@@ -175,21 +175,21 @@ so components can be scripted.
 
 - **DevYatsu's `script` crate** (a TypeScript-like interpreter) is the natural
   scripting host — and DevYatsu also made an expressjs-like web lib, so it
-  pairs with the web module. Mercury's `Var` is the bridge between native Rust
+  pairs with the web module. Hydrargyros's `Var` is the bridge between native Rust
   and scripts.
 - The ambition: write a prototype in `Var`/script ergonomics, then derive a
   typed native path for the hot loop. That's gold's thesis, made Rust-native.
 
-## What Mercury will NOT do
+## What Hydrargyros will NOT do
 
 - **Not integrate into Bevy.** Bevy is ECS-first (homogeneous typed components,
   archetype storage); `Var` is type-erased and shared-mutable. Forcing `Var`
   into ECS systems fights the borrow checker and throws away both systems'
-  strengths. Mercury is the scripting/data layer; others may *choose* to bridge
-  it to Bevy later, but Mercury doesn't depend on or bend for Bevy.
+  strengths. Hydrargyros is the scripting/data layer; others may *choose* to bridge
+  it to Bevy later, but Hydrargyros doesn't depend on or bend for Bevy.
 - **Not reinvent wheels.** serde (serialization), hyper (HTTP), wgpu (graphics),
   tokio/futures (async), DevYatsu's script (interpreter) — each is the right
-  existing tool. Mercury's value is the `Var` seam and the ergonomics, not
+  existing tool. Hydrargyros's value is the `Var` seam and the ergonomics, not
   reimplementing the Rust ecosystem.
 
 ## Verify

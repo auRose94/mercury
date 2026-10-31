@@ -5,7 +5,7 @@
 //! events as `Var` objects into the queue the pump drains.
 //!
 //! ```
-//! use mercury::game::{Engine, WinitWindow};
+//! use hydrargyros::game::{Engine, WinitWindow};
 //!
 //! # fn demo() -> Result<(), String> {
 //! let window = WinitWindow::new("my game", (800, 450))?;

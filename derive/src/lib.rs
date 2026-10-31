@@ -1,4 +1,4 @@
-//! Derive macros for Mercury.
+//! Derive macros for Hydrargyros.
 //!
 //! [`FromVar`] turns a `Var` object into a typed struct, field by field —
 //! the Rust-native answer to "script ergonomics, native speed": prototyping
@@ -99,10 +99,10 @@ pub fn derive_from_var(input: TokenStream) -> TokenStream {
             quote! {
                 #ident: {
                     let __v = __root.get(#key);
-                    if __v.ty() == ::mercury::Ty::Null {
+                    if __v.ty() == ::hydrargyros::Ty::Null {
                         ::std::default::Default::default()
                     } else {
-                        <#ty as ::mercury::FromVar>::from_var(&__v)
+                        <#ty as ::hydrargyros::FromVar>::from_var(&__v)
                             .map_err(|e| e.at(#label))?
                     }
                 }
@@ -111,7 +111,7 @@ pub fn derive_from_var(input: TokenStream) -> TokenStream {
             quote! {
                 #ident: {
                     let __v = __root.get(#key);
-                    <#ty as ::mercury::FromVar>::from_var(&__v)
+                    <#ty as ::hydrargyros::FromVar>::from_var(&__v)
                         .map_err(|e| e.at(#label))?
                 }
             }
@@ -123,10 +123,10 @@ pub fn derive_from_var(input: TokenStream) -> TokenStream {
 
     quote! {
         #[automatically_derived]
-        impl #impl_generics ::mercury::FromVar for #name #ty_generics #where_clause {
-            fn from_var(__root: &::mercury::Var) -> ::std::result::Result<Self, ::mercury::FromVarError> {
-                if !matches!(__root.ty(), ::mercury::Ty::Object) {
-                    return ::std::result::Result::Err(::mercury::FromVarError::new(
+        impl #impl_generics ::hydrargyros::FromVar for #name #ty_generics #where_clause {
+            fn from_var(__root: &::hydrargyros::Var) -> ::std::result::Result<Self, ::hydrargyros::FromVarError> {
+                if !matches!(__root.ty(), ::hydrargyros::Ty::Object) {
+                    return ::std::result::Result::Err(::hydrargyros::FromVarError::new(
                         ::std::format!("expected object, found {}", __root.ty()),
                     ));
                 }
