@@ -4,6 +4,14 @@
 //! actual pixels; a window-presenting backend is a later rung.
 
 const WGSL: &str = r#"
+struct Scene {
+    pos: vec2f,
+    size: vec2f,
+    color: vec4f,
+};
+
+@group(0) @binding(0) var<uniform> scene: Scene;
+
 struct VsOut {
     @builtin(position) pos: vec4f,
     @location(0) color: vec3f,
@@ -11,10 +19,13 @@ struct VsOut {
 
 @vertex
 fn vs(@builtin(vertex_index) i: u32) -> VsOut {
-    var p = array(vec2f(-0.5, -0.5), vec2f(0.5, -0.5), vec2f(0.0, 0.5));
+    var corners = array(
+        vec2f(-0.5, -0.5), vec2f(0.5, -0.5), vec2f(-0.5, 0.5),
+        vec2f(-0.5, 0.5), vec2f(0.5, -0.5), vec2f(0.5, 0.5),
+    );
     var out: VsOut;
-    out.pos = vec4f(p[i], 0.0, 1.0);
-    out.color = vec3f(1.0, 0.4, 0.1);
+    out.pos = vec4f(scene.pos + corners[i] * scene.size, 0.0, 1.0);
+    out.color = scene.color.rgb;
     return out;
 }
 
@@ -24,16 +35,38 @@ fn fs(in: VsOut) -> @location(0) vec4f {
 }
 "#;
 
+/// The per-frame uniform: one solid quad in clip space.
+#[derive(Clone, Copy)]
+struct Scene {
+    pos: [f32; 2],
+    size: [f32; 2],
+    color: [f32; 4],
+}
+
+impl Scene {
+    fn bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(32);
+        for f in self.pos.iter().chain(self.size.iter()).chain(self.color.iter()) {
+            out.extend_from_slice(&f.to_le_bytes());
+        }
+        out
+    }
+}
+
 /// An offscreen wgpu renderer: clears to the set color and draws a solid
 /// test triangle. `screenshot()` returns the last frame as RGBA8 rows.
 pub struct WgpuRenderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::RenderPipeline,
+    uniforms: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
     target: wgpu::Texture,
     readback: wgpu::Buffer,
     size: (u32, u32),
     clear_color: [f64; 4],
+    scene: Scene,
+    frame_sink: Option<crate::game::render::FrameSink>,
     last_frame: Vec<u8>,
 }
 
@@ -56,16 +89,30 @@ impl WgpuRenderer {
             .map_err(|e| format!("wgpu device: {e}"))?;
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("mercury-test-triangle"),
+            label: Some("mercury-quad"),
             source: wgpu::ShaderSource::Wgsl(WGSL.into()),
         });
+        let bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: None,
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(32),
+                    },
+                    count: None,
+                }],
+            });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[],
+            bind_group_layouts: &[Some(&bind_group_layout)],
             immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("mercury-test-triangle"),
+            label: Some("mercury-quad"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -88,6 +135,21 @@ impl WgpuRenderer {
             multisample: wgpu::MultisampleState::default(),
             cache: None,
             multiview_mask: None,
+        });
+
+        let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mercury-scene"),
+            size: 32,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniforms.as_entire_binding(),
+            }],
         });
 
         let target = device.create_texture(&wgpu::TextureDescriptor {
@@ -113,16 +175,36 @@ impl WgpuRenderer {
             device,
             queue,
             pipeline,
+            uniforms,
+            bind_group,
             target,
             readback,
             size: (width, height),
             clear_color: [0.1, 0.2, 0.3, 1.0],
+            scene: Scene {
+                pos: [0.0, 0.0],
+                size: [0.25, 0.25],
+                color: [1.0, 0.4, 0.1, 1.0],
+            },
+            frame_sink: None,
             last_frame: Vec::new(),
         })
     }
 
     pub fn set_clear_color(&mut self, color: [f64; 4]) {
         self.clear_color = color;
+    }
+
+    /// Place the solid quad (clip-space center and half-extents), with its
+    /// color — the v0 "mesh": enough to see an entity move.
+    pub fn set_quad(&mut self, pos: [f32; 2], size: [f32; 2], color: [f32; 4]) {
+        self.scene = Scene { pos, size, color };
+    }
+
+    /// Publish every rendered frame into this sink (a streaming window
+    /// backend reads from it).
+    pub fn attach_sink(&mut self, sink: crate::game::render::FrameSink) {
+        self.frame_sink = Some(sink);
     }
 
     /// The last rendered frame: RGBA8 rows, de-padded, top to bottom.
@@ -142,6 +224,8 @@ impl super::render::RenderBackend for WgpuRenderer {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        self.queue
+            .write_buffer(&self.uniforms, 0, &self.scene.bytes());
         {
             let clear = wgpu::Color {
                 r: self.clear_color[0],
@@ -166,7 +250,8 @@ impl super::render::RenderBackend for WgpuRenderer {
                 multiview_mask: None,
             });
             pass.set_pipeline(&self.pipeline);
-            pass.draw(0..3, 0..1);
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.draw(0..6, 0..1);
         }
         let bytes_per_row = (width * 4).div_ceil(256) * 256;
         encoder.copy_texture_to_buffer(
@@ -195,6 +280,9 @@ impl super::render::RenderBackend for WgpuRenderer {
         }
         drop(data);
         self.readback.unmap();
+        if let Some(sink) = &self.frame_sink {
+            sink.publish(width, height, frame.clone());
+        }
         self.last_frame = frame;
     }
 }

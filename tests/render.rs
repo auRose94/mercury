@@ -41,8 +41,8 @@ fn offscreen_frame_has_expected_pixels() {
         assert!((*got as i32 - want as i32).abs() <= 3, "corner {corner:?} vs {expected:?}");
     }
 
-    // the triangle's centroid: solid triangle color (1.0, 0.4, 0.1)
-    let inside = pixel(frame, 64, 32, 37);
+    // the quad's center: solid quad color (1.0, 0.4, 0.1)
+    let inside = pixel(frame, 64, 32, 32);
     let expected = [srgb8(1.0), srgb8(0.4), srgb8(0.1), 255];
     for (got, want) in inside.iter().zip(expected) {
         assert!((*got as i32 - want as i32).abs() <= 3, "inside {inside:?} vs {expected:?}");

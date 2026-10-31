@@ -51,6 +51,8 @@ web = ["dep:axum", "dep:tokio", "dep:futures-util", "dep:axum-server", "dep:rust
 physics = ["dep:rapier3d"]
 # render: the wgpu offscreen renderer
 wgpu = ["dep:wgpu", "dep:pollster"]
+# stream: the webapp windowing backend (canvas page over the render buffer)
+stream = ["dep:axum", "dep:tokio", "dep:futures-util"]
 
 [dev-dependencies]
 serde_json = "1"
@@ -76,3 +78,7 @@ required-features = ["web"]
 [[example]]
 name = "game_world"
 required-features = ["physics", "wgpu"]
+
+[[example]]
+name = "game_stream"
+required-features = ["physics", "wgpu", "stream"]

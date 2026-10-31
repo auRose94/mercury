@@ -140,9 +140,14 @@ Ported from gold's `game` module, headless first (gold ships a
   a Rust trait; typed lookup by downcasting.
 - **Entity/Transform** — the scene tree: transforms (position/rotation/
   scale) composing parent-first down the hierarchy, enable/disable.
-- **Backends** — gold's registered-backend pattern as Rust traits and
+- **Windowing** — gold's registered-backend pattern as Rust traits and
   register/create registries; `headless` is pre-registered, events cross the
-  boundary as `Var` (`o!{ "type": "quit" }`).
+  boundary as `Var` (`o!{ "type": "quit" }`). The **streaming window**
+  (behind the `stream` feature) turns the headless render buffer into a
+  browser page: a canvas app auto-opens on launch, frames stream over
+  WebSocket (`[w][h][rgba]` binary), and browser keys/mouse/wheel come back
+  through `WindowSystem::poll` as `Var` events — the engine can't tell it
+  apart from SDL, and the whole loop is inspectable by an AI or a test.
 - **Physics** (behind the `physics` feature) — gold's `world`/`physicsBackend`
   split: a `PhysicsWorldBackend` trait + registry, the built-in no-op `none`
   backend (bodies no-op, transforms stay under script control — gold ships
@@ -154,9 +159,9 @@ Ported from gold's `game` module, headless first (gold ships a
 - **Render** (behind the `wgpu` feature) — a `RenderBackend` trait and an
   **offscreen wgpu renderer**: no window, no surface — frames render to a
   texture, get read back, and can be saved as PNGs (gold's screenshot debug
-  aid), so tests assert actual pixels. Vertex/pixel pipeline proven with a
-  solid triangle over a clear color; a mesh/renderable system and
-  window-presenting backend are the next rungs.
+  aid), so tests assert actual pixels. A uniform-driven quad (position,
+  size, color) is the v0 "mesh" — enough to watch an entity move; meshes,
+  renderables and cameras are the next rungs.
 
 Next: meshes/renderables/cameras on the renderer, then the interpreter seam
 so components can be scripted.

@@ -70,8 +70,10 @@ let json = serde_json::to_string(&v).unwrap();
 - **Game** — the engine core, headless-first: gold's pump + dispatch,
   priority-tiered components, entity/transform scene tree, backend
   registries, events as `Var`, a rapier3d physics world (behind the
-  `physics` feature) with step-and-sync, and an offscreen wgpu renderer
-  with pixel-verified screenshots (behind the `wgpu` feature).
+  `physics` feature) with step-and-sync, an offscreen wgpu renderer
+  with pixel-verified screenshots (behind the `wgpu` feature), and a
+  **streaming window** (behind the `stream` feature) that serves the
+  render buffer to a browser and turns browser events into engine events.
   Meshes/renderables next.
 
 See [docs/roadmap.md](docs/roadmap.md) for the full plan and the architecture

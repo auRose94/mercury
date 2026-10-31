@@ -43,6 +43,8 @@ pub mod physics_body;
 pub mod render;
 #[cfg(feature = "wgpu")]
 pub mod render_wgpu;
+#[cfg(feature = "stream")]
+pub mod stream_window;
 pub mod transform;
 pub mod window;
 
@@ -53,6 +55,10 @@ pub use physics::PhysicsWorld;
 pub use physics_body::PhysicsBody;
 pub use render::RenderBackend;
 #[cfg(feature = "wgpu")]
+pub use render::FrameSink;
+#[cfg(feature = "wgpu")]
 pub use render_wgpu::WgpuRenderer;
+#[cfg(feature = "stream")]
+pub use stream_window::StreamingWindow;
 pub use transform::Transform;
 pub use window::{create_window_backend, register_window_backend, HeadlessWindow, WindowSystem};
