@@ -69,7 +69,10 @@ let json = serde_json::to_string(&v).unwrap();
   with the `database` facade. *Done.*
 - **Game** — the engine core, headless-first: gold's pump + dispatch,
   priority-tiered components, entity/transform scene tree, backend
-  registries, events as `Var`. wgpu render backend next.
+  registries, events as `Var`, a rapier3d physics world (behind the
+  `physics` feature) with step-and-sync, and an offscreen wgpu renderer
+  with pixel-verified screenshots (behind the `wgpu` feature).
+  Meshes/renderables next.
 
 See [docs/roadmap.md](docs/roadmap.md) for the full plan and the architecture
 decisions (why `Arc<Mutex>`, why serde, why not Bevy).

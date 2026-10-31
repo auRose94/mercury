@@ -42,6 +42,7 @@ impl Component for Player {
         println!("  {:?} at x={:.2} (dt={dt})", self.config.name, self.x);
     }
     fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 }
 
 // a draw-priority component: runs after all updates, like renderables will
@@ -55,6 +56,7 @@ impl Component for Hud {
         println!("  [hud] drawing frame for {:?}", self.player_name);
     }
     fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 }
 
 fn main() {

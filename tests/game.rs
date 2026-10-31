@@ -23,6 +23,7 @@ impl Component for Trace {
     fn initialize(&mut self) { self.log.lock().unwrap().push("init"); }
     fn update(&mut self, _dt: f64) { self.log.lock().unwrap().push(self.label); }
     fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 }
 
 #[test]
@@ -128,6 +129,7 @@ fn typed_component_lookup() {
     struct Health(f64);
     impl Component for Health {
         fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
     }
 
     let mut parent = Entity::new("parent");
@@ -218,4 +220,52 @@ fn frames_can_be_driven_without_a_window() {
 fn window_trait_is_object_safe_over_threads() {
     fn assert_send<T: Send>() {}
     assert_send::<Box<dyn WindowSystem>>();
+}
+
+// ---- physics integration: the engine materializes bodies and syncs poses ----
+
+#[test]
+fn none_backend_keeps_transforms_under_script_control() {
+    use mercury::game::{PhysicsBody, PhysicsWorld};
+    use mercury::var::Vec3;
+    use mercury::game::physics::Shape;
+
+    let mut engine = Engine::new("acme", "none-physics");
+    engine.set_physics(PhysicsWorld::none());
+    let mut e = Entity::new("ghost");
+    e.transform_mut().position = Vec3::new(1.0, 2.0, 3.0);
+    e.add_component(Box::new(PhysicsBody::new("ghost", Shape::Sphere(0.5))));
+    engine.add_entity(e);
+
+    // several frames: the none backend never reports a pose, so the
+    // transform stays exactly where the script put it
+    for _ in 0..10 {
+        engine.update(1.0 / 60.0);
+    }
+    let t = engine.entities()[0].transform();
+    assert_eq!(t.position, Vec3::new(1.0, 2.0, 3.0));
+}
+
+#[cfg(feature = "physics")]
+#[test]
+fn rapier_world_syncs_falling_poses_into_transforms() {
+    use mercury::game::{PhysicsBody, PhysicsWorld};
+    use mercury::var::Vec3;
+    use mercury::game::physics::Shape;
+
+    let mut engine = Engine::new("acme", "rapier-sync");
+    engine.frame_time(0.0);
+    engine.set_physics(PhysicsWorld::create("rapier", &Var::Null).unwrap());
+    let mut e = Entity::new("ball");
+    e.transform_mut().position = Vec3::new(0.0, 10.0, 0.0);
+    e.add_component(Box::new(PhysicsBody::new("ball", Shape::Sphere(0.5))));
+    engine.add_entity(e);
+
+    let dt = 1.0 / 60.0;
+    for _ in 0..60 {
+        engine.update(dt);
+    }
+    let y = engine.entities()[0].transform().position.y;
+    assert!(y < 10.0 - 1.0, "the engine should have synced the fall: y={y}");
+    assert!(y > 0.0, "should still be well above a floor it never had: y={y}");
 }

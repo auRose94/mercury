@@ -56,4 +56,8 @@ pub trait Component: Send {
 
     /// Typed lookup support (`entity.get_components::<T>()`).
     fn as_any(&self) -> &dyn Any;
+
+    /// Mutable typed lookup — the engine's physics pass configures
+    /// components that way (materializing bodies).
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }

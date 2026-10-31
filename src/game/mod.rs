@@ -36,11 +36,23 @@
 pub mod component;
 pub mod engine;
 pub mod entity;
+#[cfg(feature = "physics")]
+pub mod physics_rapier;
+pub mod physics;
+pub mod physics_body;
+pub mod render;
+#[cfg(feature = "wgpu")]
+pub mod render_wgpu;
 pub mod transform;
 pub mod window;
 
 pub use component::{Component, Priority};
 pub use engine::Engine;
 pub use entity::Entity;
+pub use physics::PhysicsWorld;
+pub use physics_body::PhysicsBody;
+pub use render::RenderBackend;
+#[cfg(feature = "wgpu")]
+pub use render_wgpu::WgpuRenderer;
 pub use transform::Transform;
 pub use window::{create_window_backend, register_window_backend, HeadlessWindow, WindowSystem};

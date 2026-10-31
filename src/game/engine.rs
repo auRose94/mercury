@@ -10,6 +10,9 @@ use std::time::{Duration, Instant};
 
 use super::component::Priority;
 use super::entity::Entity;
+use super::physics::PhysicsWorld;
+use super::physics_body::PhysicsBody;
+use super::render::RenderBackend;
 use super::window::{create_window_backend, WindowSystem};
 use crate::var::Var;
 
@@ -26,6 +29,11 @@ pub struct Engine {
     /// headless runs and tests).
     frame_time: f64,
     settings_root: PathBuf,
+    physics: Option<PhysicsWorld>,
+    renderer: Option<Box<dyn RenderBackend>>,
+    /// Fixed delta time for the pump (seconds). `None` = wall clock (gold's
+    /// behavior); headless sims set it for deterministic frames.
+    fixed_dt: Option<f64>,
 }
 
 impl Engine {
@@ -39,7 +47,35 @@ impl Engine {
             running: false,
             frame_time: 16.0,
             settings_root: PathBuf::from("."),
+            physics: None,
+            renderer: None,
+            fixed_dt: None,
         }
+    }
+
+    /// Drive the pump with a fixed delta time instead of the wall clock —
+    /// the headless way to get deterministic frames (240 frames at 1/60 =
+    /// 4 simulated seconds, however fast the machine runs).
+    pub fn fixed_dt(&mut self, seconds: f64) -> &mut Self {
+        self.fixed_dt = Some(seconds);
+        self
+    }
+
+    /// Attach the physics world (gold's engine holds a `world` object).
+    pub fn set_physics(&mut self, world: PhysicsWorld) -> &mut Self {
+        self.physics = Some(world);
+        self
+    }
+
+    /// The physics world, if one is attached.
+    pub fn physics_mut(&mut self) -> Option<&mut PhysicsWorld> {
+        self.physics.as_mut()
+    }
+
+    /// Attach a render backend (gold's `graphics` object).
+    pub fn set_renderer(&mut self, renderer: Box<dyn RenderBackend>) -> &mut Self {
+        self.renderer = Some(renderer);
+        self
     }
 
     /// Attach a top-level entity (gold's `engine += [component, entity]`).
@@ -128,9 +164,19 @@ impl Engine {
                 window.handle_event(&event);
             }
 
-            let dt = last.elapsed().as_secs_f64();
+            // gold's frame: gfx.preFrame before the update pass
+            if let Some(renderer) = &mut self.renderer {
+                renderer.pre_frame();
+            }
+
+            let dt = self.fixed_dt.unwrap_or_else(|| last.elapsed().as_secs_f64());
             self.update(dt);
             self.draw();
+
+            // and gfx.renderFrame after the draw pass
+            if let Some(renderer) = &mut self.renderer {
+                renderer.render_frame();
+            }
 
             if self.frame_time > 0.0 {
                 let elapsed = last.elapsed();
@@ -142,11 +188,14 @@ impl Engine {
         }
     }
 
-    /// One frame's update pass: sort components by priority (stable, every
-    /// frame — priorities can change), initialize newcomers, then update
-    /// every enabled component with the frame's delta time. Public so tests
-    /// and headless code can drive frames without a window.
+    /// One frame's update pass: the physics world steps and its body poses
+    /// sync back into entity transforms (gold's step-and-sync), then
+    /// components sort by priority (stable, every frame — priorities can
+    /// change), initialize newcomers, and update with the frame's delta
+    /// time. Public so tests and headless code can drive frames without a
+    /// window.
     pub fn update(&mut self, dt: f64) {
+        self.physics_step_and_sync(dt as f32);
         for (_, path) in self.update_order() {
             let slot = self.slot_at_mut(&path);
             if !slot.initialized {
@@ -174,6 +223,73 @@ impl Engine {
         self.entities[*entity_idx].slot_at_mut(rest)
     }
 
+    /// All slot paths in the tree, unsorted (physics walks these).
+    fn all_slot_paths(&self) -> Vec<SlotPath> {
+        let mut order: Vec<(i64, SlotPath)> = Vec::new();
+        let mut path = Vec::new();
+        for (entity_idx, entity) in self.entities.iter().enumerate() {
+            path.push(entity_idx);
+            entity.collect_order(&mut path, &mut order);
+            path.pop();
+        }
+        order.into_iter().map(|(_, p)| p).collect()
+    }
+
+    /// gold's step-and-sync: the physics world advances, then every
+    /// materialized body's pose writes back into its entity's transform.
+    /// Under the `none` backend (or with no world), transforms stay under
+    /// script control — the sync finds nothing to write.
+    fn physics_step_and_sync(&mut self, dt: f32) {
+        if self.physics.is_none() {
+            return;
+        }
+        let paths = self.all_slot_paths();
+        let Self { physics, entities, .. } = self;
+        let Some(physics) = physics else { return };
+
+        // materialize bodies that joined since the last frame — gold's
+        // physicsBody spawns at its ENTITY's transform
+        for path in &paths {
+            let entity_path = &path[..path.len() - 1];
+            let [first, rest @ ..] = entity_path else { continue };
+            let Some(entity) = walk_mut(entities, *first, rest) else { continue };
+            let last = *path.last().unwrap();
+            let pose = *entity.transform();
+            let slot = entity.slot_at_mut(&[last]);
+            let Some(body) = slot.component.as_any_mut().downcast_mut::<PhysicsBody>() else {
+                    continue;
+            };
+            if !body.materialized {
+                physics.add_body(
+                    &body.name, &body.shape, body.body_type,
+                    pose.position, pose.rotation, body.gravity_scale,
+                );
+                body.materialized = true;
+            }
+        }
+
+        physics.step(dt);
+
+        // sync poses → entity transforms
+        for path in &paths {
+            let name = {
+                let slot = entities[path[0]].slot_at_mut(&path[1..]);
+                match slot.component.as_any().downcast_ref::<PhysicsBody>() {
+                    Some(body) if body.materialized => body.name.clone(),
+                    _ => continue,
+                }
+            };
+            let Some((position, rotation)) = physics.body_pose(&name) else {
+                    continue;
+            };
+            let entity_path = &path[..path.len() - 1];
+            let [first, rest @ ..] = entity_path else { continue };
+            let Some(entity) = walk_mut(entities, *first, rest) else { continue };
+            entity.transform_mut().position = position;
+            entity.transform_mut().rotation = rotation;
+        }
+    }
+
     /// Flat slot paths over the whole tree, in priority order — gold's
     /// `sortComponents` across the flat component list.
     fn update_order(&self) -> Vec<(i64, SlotPath)> {
@@ -187,4 +303,17 @@ impl Engine {
         order.sort_by_key(|(p, _)| *p);
         order
     }
+}
+
+/// Walk an entity tree: top-level index, then child indices.
+fn walk_mut<'a>(
+    entities: &'a mut [Entity],
+    top: usize,
+    rest: &[usize],
+) -> Option<&'a mut Entity> {
+    let mut entity = entities.get_mut(top)?;
+    for idx in rest {
+        entity = entity.child_mut(*idx)?;
+    }
+    Some(entity)
 }

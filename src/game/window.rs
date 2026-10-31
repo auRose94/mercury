@@ -64,6 +64,8 @@ pub struct HeadlessWindow {
     events: VecDeque<Var>,
     quit_on_empty: bool,
     quit_sent: bool,
+    /// Silent-frames countdown for [`for_frames`](Self::for_frames).
+    frames_left: Option<usize>,
 }
 
 impl HeadlessWindow {
@@ -71,7 +73,12 @@ impl HeadlessWindow {
     /// `Engine::stop` from a component, or drive frames with
     /// [`Engine::update`](crate::game::Engine::update) directly.
     pub fn new() -> Self {
-        HeadlessWindow { events: VecDeque::new(), quit_on_empty: false, quit_sent: false }
+        HeadlessWindow {
+            events: VecDeque::new(),
+            quit_on_empty: false,
+            quit_sent: false,
+            frames_left: None,
+        }
     }
 
     /// A scripted window: emits the given events (all on the first poll),
@@ -81,6 +88,18 @@ impl HeadlessWindow {
             events: events.into_iter().collect(),
             quit_on_empty: true,
             quit_sent: false,
+            frames_left: None,
+        }
+    }
+
+    /// A window that stays silent for exactly `frames` frames, then quits —
+    /// the headless way to run a simulation for a known amount of time.
+    pub fn for_frames(frames: usize) -> Self {
+        HeadlessWindow {
+            events: VecDeque::new(),
+            quit_on_empty: false,
+            quit_sent: false,
+            frames_left: Some(frames),
         }
     }
 }
@@ -91,10 +110,16 @@ impl Default for HeadlessWindow {
 
 impl WindowSystem for HeadlessWindow {
     fn poll(&mut self) -> Vec<Var> {
+        if let Some(left) = &mut self.frames_left {
+            if *left > 0 {
+                *left -= 1;
+                return Vec::new();
+            }
+        }
         if !self.events.is_empty() {
             return self.events.drain(..).collect();
         }
-        if self.quit_on_empty && !self.quit_sent {
+        if (self.quit_on_empty || self.frames_left.is_some()) && !self.quit_sent {
             self.quit_sent = true;
             let ev = Object::new();
             ev.set("type", Var::from("quit"));

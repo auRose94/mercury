@@ -46,7 +46,7 @@ The core is implemented and tested (`tests/ergonomics.rs`, `tests/serde.rs`,
 | `src/web/database.rs` | the `database` facade — config in, collection handles out |
 | `src/web/http/` | http layer (behind the `web` feature) — `Server` facade (verbs, `:param`/`*` patterns, `ws`, `mount`, `on_error`, `start`/`stop`), `Response`, request staging; `post_var`/`get_var` sugar; axum underneath |
 | `src/from_var.rs` + `derive/` | `FromVar` — the typed hot-path seam: `#[derive(FromVar)]` turns a `Var` object into a strict, path-tracked struct |
-| `src/game/` | game module — `Engine` (gold's pump), `Component` (priority tiers), `Entity`/`Transform` (scene tree), `WindowSystem` registry + `HeadlessWindow` |
+| `src/game/` | game module — `Engine` (gold's pump), `Component` (priority tiers), `Entity`/`Transform` (scene tree), `WindowSystem` registry + `HeadlessWindow`, physics (`PhysicsWorldBackend` + `none`/rapier backends, `PhysicsBody` step-and-sync), `RenderBackend` + offscreen wgpu renderer |
 
 Key design choices:
 
@@ -140,13 +140,26 @@ Ported from gold's `game` module, headless first (gold ships a
   a Rust trait; typed lookup by downcasting.
 - **Entity/Transform** — the scene tree: transforms (position/rotation/
   scale) composing parent-first down the hierarchy, enable/disable.
-- **Backends** — gold's registered-backend pattern as Rust traits and a
-  register/create registry; `headless` is pre-registered, events cross the
+- **Backends** — gold's registered-backend pattern as Rust traits and
+  register/create registries; `headless` is pre-registered, events cross the
   boundary as `Var` (`o!{ "type": "quit" }`).
+- **Physics** (behind the `physics` feature) — gold's `world`/`physicsBackend`
+  split: a `PhysicsWorldBackend` trait + registry, the built-in no-op `none`
+  backend (bodies no-op, transforms stay under script control — gold ships
+  the same fallback), and **rapier3d** as the real simulation: box/sphere
+  rigid bodies, gravity, stepping, raycasts that name the hit body. The
+  engine materializes `PhysicsBody` components at their entity transforms
+  and syncs poses back every frame (gold's step-and-sync). The pump takes a
+  fixed timestep for deterministic headless sims.
+- **Render** (behind the `wgpu` feature) — a `RenderBackend` trait and an
+  **offscreen wgpu renderer**: no window, no surface — frames render to a
+  texture, get read back, and can be saved as PNGs (gold's screenshot debug
+  aid), so tests assert actual pixels. Vertex/pixel pipeline proven with a
+  solid triangle over a clear color; a mesh/renderable system and
+  window-presenting backend are the next rungs.
 
-Next: the wgpu render backend behind the same registry, then the physics
-world (gold's `world` step/gravity/raytrace), then the interpreter seam so
-components can be scripted.
+Next: meshes/renderables/cameras on the renderer, then the interpreter seam
+so components can be scripted.
 
 ### Scripting layer (cross-cutting)
 

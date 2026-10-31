@@ -51,6 +51,11 @@ impl Entity {
 
     pub fn children(&self) -> &[Entity] { &self.children }
 
+    /// A mutable child by index (the engine's physics sync walks these).
+    pub(crate) fn child_mut(&mut self, idx: usize) -> Option<&mut Entity> {
+        self.children.get_mut(idx)
+    }
+
     pub fn enabled(&self) -> bool { self.enabled }
 
     pub fn set_enabled(&mut self, enabled: bool) { self.enabled = enabled; }

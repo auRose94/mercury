@@ -31,6 +31,13 @@ axum = { version = "0.8", features = ["ws"], optional = true }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "time"], optional = true }
 # http internals: chunked/ws streams, HTTPS transport (gold's lws sslCert/sslKey)
 futures-util = { version = "0.3", optional = true }
+# game module: rapier = the world sim (gold's world/physicsBackend, via the
+# `physics` feature); wgpu = the render backend (`wgpu` feature). Both
+# optional so the core stays lean — gold gates Bullet the same way.
+rapier3d = { version = "0.36", optional = true }
+wgpu = { version = "30", optional = true }
+# blocking on wgpu adapter/device futures for offscreen setup
+pollster = { version = "0.4", optional = true }
 axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }
 rustls = { version = "0.23", features = ["ring"], optional = true }
 tokio-rustls = { version = "0.26", optional = true }
@@ -40,6 +47,10 @@ default = []
 # web: the http layer (Server/Response/ws/https). Optional so the core +
 # parsers + store stay lean for embedding (Bevy etc.).
 web = ["dep:axum", "dep:tokio", "dep:futures-util", "dep:axum-server", "dep:rustls", "dep:tokio-rustls"]
+# physics: the rapier world sim (a "none" backend ships without it)
+physics = ["dep:rapier3d"]
+# render: the wgpu offscreen renderer
+wgpu = ["dep:wgpu", "dep:pollster"]
 
 [dev-dependencies]
 serde_json = "1"
@@ -51,6 +62,8 @@ tokio-tungstenite = "0.24"
 futures-util = "0.3"
 # self-signed certs for the HTTPS tests
 rcgen = "0.13"
+# PNG screenshots for the wgpu render example
+image = "0.25"
 
 [[example]]
 name = "web_demo"
@@ -59,3 +72,7 @@ required-features = ["web"]
 [[example]]
 name = "web_site"
 required-features = ["web"]
+
+[[example]]
+name = "game_world"
+required-features = ["physics", "wgpu"]
